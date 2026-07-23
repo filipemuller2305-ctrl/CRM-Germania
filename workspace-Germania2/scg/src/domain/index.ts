@@ -14,6 +14,9 @@ export { Money, MoneyInvalidError } from "./value-objects/money";
 export { Person, PersonValidationError } from "./entities/person.entity";
 export type { PersonProps, CreatePersonInput } from "./entities/person.entity";
 
+export { Lead, LeadValidationError } from "./entities/lead.entity";
+export type { LeadProps, CreateLeadInput } from "./entities/lead.entity";
+
 export { Opportunity, OpportunityValidationError } from "./entities/opportunity.entity";
 export type { OpportunityProps, CreateOpportunityInput } from "./entities/opportunity.entity";
 
@@ -36,8 +39,17 @@ export * from "./events";
 export { CrossSellEngine } from "./services/cross-sell-engine";
 export type { CrossSellRule, PersonProductSnapshot, CrossSellSuggestionOutput } from "./services/cross-sell-engine";
 
-export { RenewalDetector, RENEWAL_WINDOW_DAYS } from "./services/renewal-detector";
-export type { RenewableProduct, OpenOpportunityRef, RenewalCandidate } from "./services/renewal-detector";
+export {
+  RenewalDetector,
+  RenewalValidationError,
+  RENEWAL_WINDOW_DAYS,
+  RENEWAL_OVERDUE_LOOKBACK_DAYS,
+} from "./services/renewal-detector";
+export type {
+  RenewableProduct,
+  ExistingRenewalRef,
+  RenewalCandidate,
+} from "./services/renewal-detector";
 
 export { OpportunityInvariants, InvariantViolationError } from "./services/opportunity-invariants";
 export type { StageRef, NextStepRef } from "./services/opportunity-invariants";

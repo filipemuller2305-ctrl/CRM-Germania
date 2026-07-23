@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { DrizzlePersonRepository } from "./person.repository";
+import { DrizzleLeadRepository } from "./lead.repository";
 import { DrizzleOpportunityRepository } from "./opportunity.repository";
 import { DrizzleNextStepRepository } from "./next-step.repository";
 import { DrizzleActivityRepository } from "./activity.repository";
@@ -15,6 +16,7 @@ import { DrizzlePipelineRepository } from "./pipeline.repository";
 import { DrizzleUserRepository } from "./user.repository";
 import type {
   PersonRepository,
+  LeadRepository,
   OpportunityRepository,
   NextStepRepository,
   ActivityRepository,
@@ -30,6 +32,7 @@ import type {
 
 export interface Repositories {
   person: PersonRepository;
+  lead: LeadRepository;
   opportunity: OpportunityRepository;
   nextStep: NextStepRepository;
   activity: ActivityRepository;
@@ -54,6 +57,7 @@ export function getRepositories(): Repositories {
   if (!_instance) {
     _instance = {
       person: new DrizzlePersonRepository(),
+      lead: new DrizzleLeadRepository(),
       opportunity: new DrizzleOpportunityRepository(),
       nextStep: new DrizzleNextStepRepository(),
       activity: new DrizzleActivityRepository(),
@@ -72,6 +76,7 @@ export function getRepositories(): Repositories {
 
 export {
   DrizzlePersonRepository,
+  DrizzleLeadRepository,
   DrizzleOpportunityRepository,
   DrizzleNextStepRepository,
   DrizzleActivityRepository,

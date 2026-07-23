@@ -3,7 +3,10 @@
 // INV-08: Quando produto é ativado → engine de Cross Selling avalia sugestões
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { ProductActivatedEvent, CrossSellDetectedEvent } from "@/domain/events";
+import {
+  CrossSellDetectedEvent,
+  type ProductActivatedEvent,
+} from "@/domain/events";
 import { CrossSellEngine } from "@/domain/services/cross-sell-engine";
 import { eventBus } from "@/infrastructure/events/event-bus";
 import type {
@@ -76,7 +79,7 @@ export class OnProductActivatedHandler {
 
       // Evento
       await eventBus.emit(
-        new (await import("@/domain/events")).CrossSellDetectedEvent(
+        new CrossSellDetectedEvent(
           saved.id,
           personId,
           suggestion.productTypeId,

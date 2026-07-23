@@ -1,42 +1,52 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// Use Case: Register Activity
-// Registra uma atividade e opcionalmente gera um novo Próximo Passo (INV-07)
-// ═══════════════════════════════════════════════════════════════════════════
-
 import { z } from "zod";
 import { Activity } from "@/domain/entities/activity.entity";
 import { NextStep } from "@/domain/entities/next-step.entity";
 import { ActivityRegisteredEvent, NextStepCreatedEvent } from "@/domain/events";
 import { eventBus } from "@/infrastructure/events/event-bus";
 import { ActivityType } from "@/domain/types";
-import type {
-  ActivityRepository,
-  NextStepRepository,
-  OpportunityRepository,
-  TimelineRepository,
-} from "../ports";
+import type { TransactionManager } from "../ports";
 
-// ─── SCHEMA ──────────────────────────────────────────────────────────────────
-
-export const registerActivitySchema = z.object({
-  personId: z.number().int().positive("Pessoa é obrigatória"),
-  opportunityId: z.number().int().positive().optional().nullable(),
-  type: z.nativeEnum(ActivityType, { message: "Tipo de atividade inválido" }),
-  description: z.string().max(5000).optional().nullable(),
-
-  // INV-07: Opcionalmente gera um próximo passo
-  generateNextStep: z.object({
-    enabled: z.boolean().default(false),
-    description: z.string().min(3).optional(),
-    dueDate: z.string().optional(), // YYYY-MM-DD
-    dueTime: z.string().regex(/^\d{2}:\d{2}$/).optional().nullable(),
-    objective: z.string().optional().nullable(),
-  }).optional().default({ enabled: false }),
-});
+export const registerActivitySchema = z
+  .object({
+    personId: z.number().int().positive(),
+    leadId: z.number().int().positive().optional().nullable(),
+    opportunityId: z.number().int().positive().optional().nullable(),
+    type: z.nativeEnum(ActivityType),
+    description: z.string().max(5000).optional().nullable(),
+    generateNextStep: z
+      .object({
+        enabled: z.boolean().default(false),
+        description: z.string().min(3).optional(),
+        dueDate: z.string().optional(),
+        dueTime: z.string().regex(/^\d{2}:\d{2}$/).optional().nullable(),
+        objective: z.string().optional().nullable(),
+      })
+      .optional()
+      .default({ enabled: false }),
+  })
+  .superRefine((data, context) => {
+    if (data.leadId && data.opportunityId) {
+      context.addIssue({
+        code: "custom",
+        path: ["leadId"],
+        message: "Informe Lead ou Oportunidade, nunca ambos",
+      });
+    }
+    if (
+      data.generateNextStep.enabled &&
+      (!data.opportunityId ||
+        !data.generateNextStep.description ||
+        !data.generateNextStep.dueDate)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["generateNextStep"],
+        message: "Próximo passo exige Oportunidade, descrição e data",
+      });
+    }
+  });
 
 export type RegisterActivityInput = z.infer<typeof registerActivitySchema>;
-
-// ─── RESULT ──────────────────────────────────────────────────────────────────
 
 export interface RegisterActivityResult {
   success: boolean;
@@ -46,150 +56,161 @@ export interface RegisterActivityResult {
   errorCode?: "VALIDATION" | "NOT_FOUND" | "INTERNAL";
 }
 
-// ─── USE CASE ────────────────────────────────────────────────────────────────
-
 export class RegisterActivityUseCase {
-  constructor(
-    private activityRepo: ActivityRepository,
-    private nextStepRepo: NextStepRepository,
-    private opportunityRepo: OpportunityRepository,
-    private timelineRepo: TimelineRepository
-  ) {}
+  constructor(private readonly transaction: TransactionManager) {}
 
-  async execute(input: RegisterActivityInput, actorId: number | null): Promise<RegisterActivityResult> {
-    try {
-      // 1. Validação
-      const parsed = registerActivitySchema.safeParse(input);
-      if (!parsed.success) {
-        return {
-          success: false,
-          error: parsed.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join("; "),
-          errorCode: "VALIDATION",
-        };
-      }
-
-      const data = parsed.data;
-
-      // 2. Se vinculada a oportunidade, verifica se existe e está aberta
-      if (data.opportunityId) {
-        const opp = await this.opportunityRepo.findById(data.opportunityId);
-        if (!opp) {
-          return {
-            success: false,
-            error: `Oportunidade ${data.opportunityId} não encontrada`,
-            errorCode: "NOT_FOUND",
-          };
-        }
-      }
-
-      // 3. Cria atividade
-      const activity = Activity.create({
-        personId: data.personId,
-        opportunityId: data.opportunityId,
-        ownerId: actorId,
-        type: data.type,
-        description: data.description,
-      });
-
-      const savedActivity = await this.activityRepo.create(activity);
-
-      // 4. Registra na timeline
-      const typeLabels: Record<string, string> = {
-        ligacao: "Ligação realizada",
-        whatsapp: "WhatsApp enviado",
-        email: "E-mail enviado",
-        reuniao: "Reunião realizada",
-        visita: "Visita realizada",
-        mensagem: "Mensagem enviada",
-        anotacao: "Anotação registrada",
+  async execute(
+    input: RegisterActivityInput,
+    actorId: number | null
+  ): Promise<RegisterActivityResult> {
+    const parsed = registerActivitySchema.safeParse(input);
+    if (!parsed.success) {
+      return {
+        success: false,
+        error: parsed.error.issues.map((issue) => issue.message).join("; "),
+        errorCode: "VALIDATION",
       };
+    }
 
-      await this.timelineRepo.add({
-        personId: data.personId,
-        opportunityId: data.opportunityId,
-        actorId,
-        type: data.type,
-        title: typeLabels[data.type] ?? "Atividade registrada",
-        description: data.description,
-      });
-
-      // 5. INV-07: Gera próximo passo se solicitado
-      let savedNextStepId: number | undefined;
-
-      if (data.generateNextStep.enabled && data.opportunityId) {
-        if (!data.generateNextStep.description || !data.generateNextStep.dueDate) {
-          return {
-            success: false,
-            error: "Para gerar um próximo passo, descrição e data são obrigatórios",
-            errorCode: "VALIDATION",
-          };
+    try {
+      const data = parsed.data;
+      const saved = await this.transaction.run(async (repositories) => {
+        if (data.leadId) {
+          const lead = await repositories.lead.findById(data.leadId);
+          if (!lead) {
+            throw new ActivityUseCaseError("NOT_FOUND", "Lead não encontrado");
+          }
+          if (lead.personId !== data.personId) {
+            throw new ActivityUseCaseError(
+              "VALIDATION",
+              "O Lead não pertence à Pessoa informada"
+            );
+          }
+        }
+        if (data.opportunityId) {
+          const opportunity = await repositories.opportunity.findById(
+            data.opportunityId
+          );
+          if (!opportunity) {
+            throw new ActivityUseCaseError(
+              "NOT_FOUND",
+              "Oportunidade não encontrada"
+            );
+          }
+          if (opportunity.personId !== data.personId || !opportunity.isOpen) {
+            throw new ActivityUseCaseError(
+              "VALIDATION",
+              "A Oportunidade precisa pertencer à Pessoa e estar aberta"
+            );
+          }
         }
 
-        const nextStep = NextStep.create({
-          opportunityId: data.opportunityId,
-          ownerId: actorId,
-          description: data.generateNextStep.description,
-          dueDate: data.generateNextStep.dueDate,
-          dueTime: data.generateNextStep.dueTime,
-          objective: data.generateNextStep.objective,
-        });
-
-        const savedNextStep = await this.nextStepRepo.create(nextStep);
-        savedNextStepId = savedNextStep.id;
-
-        // Timeline do next step
-        await this.timelineRepo.add({
+        const activity = await repositories.activity.create(
+          Activity.create({
+            personId: data.personId,
+            leadId: data.leadId,
+            opportunityId: data.opportunityId,
+            ownerId: actorId,
+            type: data.type,
+            description: data.description,
+          })
+        );
+        await repositories.timeline.add({
           personId: data.personId,
+          leadId: data.leadId,
           opportunityId: data.opportunityId,
           actorId,
-          type: "next_step_created",
-          title: "Próximo passo definido",
-          description: `${savedNextStep.description} (gerado a partir de atividade: ${typeLabels[data.type]})`,
-          metadata: {
-            dueDate: savedNextStep.dueDate.toISOString().split("T")[0],
-            generatedFromActivity: savedActivity.id,
-          },
+          type: "activity_registered",
+          title: "Atividade registrada",
+          description: data.description,
         });
 
-        // Evento do next step
+        let nextStep = null;
+        if (data.generateNextStep.enabled && data.opportunityId) {
+          nextStep = await repositories.nextStep.create(
+            NextStep.create({
+              opportunityId: data.opportunityId,
+              ownerId: actorId,
+              description: data.generateNextStep.description!,
+              dueDate: data.generateNextStep.dueDate!,
+              dueTime: data.generateNextStep.dueTime,
+              objective: data.generateNextStep.objective,
+            })
+          );
+          await repositories.timeline.add({
+            personId: data.personId,
+            opportunityId: data.opportunityId,
+            actorId,
+            type: "next_step_created",
+            title: "Próximo passo definido",
+            description: nextStep.description,
+            metadata: { generatedFromActivity: activity.id },
+          });
+        }
+        return { activity, nextStep };
+      });
+
+      if (saved.nextStep && data.opportunityId) {
         await eventBus.emit(
           new NextStepCreatedEvent(
-            savedNextStep.id,
+            saved.nextStep.id,
             data.opportunityId,
             data.personId,
-            savedNextStep.dueDate,
-            savedNextStep.description,
+            saved.nextStep.dueDate,
+            saved.nextStep.description,
             actorId
           )
         );
       }
-
-      // 6. Emite evento da atividade
       await eventBus.emit(
         new ActivityRegisteredEvent(
-          savedActivity.id,
+          saved.activity.id,
           data.personId,
-          data.opportunityId,
+          data.opportunityId ?? null,
           data.type,
-          data.description,
+          data.description ?? null,
           actorId
         )
       );
-
       return {
         success: true,
-        activityId: savedActivity.id,
-        nextStepId: savedNextStepId,
+        activityId: saved.activity.id,
+        nextStepId: saved.nextStep?.id,
       };
     } catch (error) {
-      if (error instanceof Error && (
-        error.name === "ActivityValidationError" ||
-        error.name === "NextStepValidationError"
-      )) {
-        return { success: false, error: error.message, errorCode: "VALIDATION" };
+      if (error instanceof ActivityUseCaseError) {
+        return {
+          success: false,
+          error: error.message,
+          errorCode: error.code,
+        };
       }
-      console.error("[RegisterActivityUseCase] Erro inesperado:", error);
-      return { success: false, error: "Erro interno ao registrar atividade", errorCode: "INTERNAL" };
+      if (
+        error instanceof Error &&
+        ["ActivityValidationError", "NextStepValidationError"].includes(
+          error.name
+        )
+      ) {
+        return {
+          success: false,
+          error: error.message,
+          errorCode: "VALIDATION",
+        };
+      }
+      return {
+        success: false,
+        error: "Erro interno ao registrar atividade",
+        errorCode: "INTERNAL",
+      };
     }
+  }
+}
+
+class ActivityUseCaseError extends Error {
+  constructor(
+    readonly code: "VALIDATION" | "NOT_FOUND",
+    message: string
+  ) {
+    super(message);
   }
 }

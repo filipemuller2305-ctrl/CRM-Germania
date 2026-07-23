@@ -4,21 +4,24 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { eq, desc, lt, sql } from "drizzle-orm";
-import { db } from "../index";
+import { db, type Database } from "../index";
 import { timelineEvents } from "../schema";
 import type { TimelineRepository, TimelineEventInput, PaginatedResult, PaginationParams } from "@/application/ports";
 
 const DEFAULT_LIMIT = 30;
 
 export class DrizzleTimelineRepository implements TimelineRepository {
+  constructor(private readonly database: Database = db) {}
+
   /**
    * Adiciona um evento à timeline.
    * ⚠️ Esta é a ÚNICA operação de escrita permitida (INSERT ONLY).
    * A tabela tem REVOKE UPDATE, DELETE no PostgreSQL como proteção extra.
    */
   async add(event: TimelineEventInput): Promise<void> {
-    await db.insert(timelineEvents).values({
+    await this.database.insert(timelineEvents).values({
       personId: event.personId,
+      leadId: event.leadId ?? null,
       opportunityId: event.opportunityId ?? null,
       actorId: event.actorId ?? null,
       type: event.type,
@@ -45,7 +48,7 @@ export class DrizzleTimelineRepository implements TimelineRepository {
       conditions.push(lt(timelineEvents.id, cursor));
     }
 
-    const rows = await db
+    const rows = await this.database
       .select({
         id: timelineEvents.id,
         personId: timelineEvents.personId,
@@ -66,7 +69,7 @@ export class DrizzleTimelineRepository implements TimelineRepository {
     const data = rows.slice(0, limit);
     const lastItem = data[data.length - 1];
 
-    const [countResult] = await db
+    const [countResult] = await this.database
       .select({ count: sql<number>`count(*)::int` })
       .from(timelineEvents)
       .where(eq(timelineEvents.personId, personId));

@@ -10,6 +10,9 @@ import { CreateOpportunityUseCase } from "./opportunity/create-opportunity.useca
 import { MoveStageUseCase } from "./opportunity/move-stage.usecase";
 import { RegisterActivityUseCase } from "./activity/register-activity.usecase";
 import { CompleteNextStepUseCase } from "./next-step/complete-next-step.usecase";
+import { ConvertLeadUseCase } from "./lead/convert-lead.usecase";
+import { CreateLeadUseCase } from "./lead/create-lead.usecase";
+import { DrizzleTransactionManager } from "@/infrastructure/db/transaction-manager";
 
 /**
  * Factory de Use Cases.
@@ -20,33 +23,30 @@ import { CompleteNextStepUseCase } from "./next-step/complete-next-step.usecase"
  */
 export function getUseCases() {
   const repos = getRepositories();
+  const transaction = new DrizzleTransactionManager();
 
   return {
     createPerson: new CreatePersonUseCase(
-      repos.person,
-      repos.timeline
+      transaction
     ),
 
+    createLead: new CreateLeadUseCase(transaction),
+    convertLead: new ConvertLeadUseCase(transaction, repos.pipeline),
+
     createOpportunity: new CreateOpportunityUseCase(
-      repos.opportunity,
-      repos.nextStep,
+      transaction,
       repos.person,
-      repos.pipeline,
-      repos.timeline
+      repos.pipeline
     ),
 
     moveStage: new MoveStageUseCase(
       repos.opportunity,
-      repos.nextStep,
       repos.pipeline,
       repos.timeline
     ),
 
     registerActivity: new RegisterActivityUseCase(
-      repos.activity,
-      repos.nextStep,
-      repos.opportunity,
-      repos.timeline
+      transaction
     ),
 
     completeNextStep: new CompleteNextStepUseCase(

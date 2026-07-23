@@ -9,7 +9,6 @@ import { OpportunityInvariants } from "@/domain/services/opportunity-invariants"
 import { eventBus } from "@/infrastructure/events/event-bus";
 import type {
   OpportunityRepository,
-  NextStepRepository,
   PipelineRepository,
   TimelineRepository,
 } from "../ports";
@@ -38,7 +37,6 @@ export interface MoveStageResult {
 export class MoveStageUseCase {
   constructor(
     private opportunityRepo: OpportunityRepository,
-    private nextStepRepo: NextStepRepository,
     private pipelineRepo: PipelineRepository,
     private timelineRepo: TimelineRepository
   ) {}
@@ -50,7 +48,7 @@ export class MoveStageUseCase {
       if (!parsed.success) {
         return {
           success: false,
-          error: parsed.error.errors.map((e) => e.message).join("; "),
+          error: parsed.error.issues.map((e) => e.message).join("; "),
           errorCode: "VALIDATION",
         };
       }
@@ -77,15 +75,19 @@ export class MoveStageUseCase {
         return { success: true, closedAs: null };
       }
 
-      // 5. Carrega a nova etapa e valida INV-04
+      // 5. Guarda a etapa anterior antes de alterar a entidade
+      const previousStageId = opportunity.stageId;
+
+      // 6. Carrega as etapas e valida INV-04
       const newStage = await this.pipelineRepo.getStageById(newStageId);
       if (!newStage) {
         return { success: false, error: "Etapa de destino não encontrada", errorCode: "NOT_FOUND" };
       }
 
       OpportunityInvariants.assertStageBelongsToPipeline(opportunity.pipelineId, newStage);
+      const previousStage = await this.pipelineRepo.getStageById(previousStageId);
 
-      // 6. Se fechando como perdida, valida INV-05
+      // 7. A entidade altera stageId e status de forma atômica
       if (newStage.kind === "lost") {
         if (!lostReason || lostReason.trim().length < 3) {
           return {
@@ -94,16 +96,8 @@ export class MoveStageUseCase {
             errorCode: "VALIDATION",
           };
         }
-        opportunity.closeAsLost(lostReason);
-      } else if (newStage.kind === "won") {
-        opportunity.closeAsWon();
-      } else {
-        // Etapa intermediária (open)
-        opportunity.moveToStage(newStageId, "open");
       }
-
-      // 7. Carrega etapa anterior para metadata
-      const prevStage = await this.pipelineRepo.getStageById(opportunity.stageId);
+      opportunity.moveToStage(newStageId, newStage.kind, lostReason);
 
       // 8. Persiste
       await this.opportunityRepo.update(opportunity);
@@ -123,7 +117,7 @@ export class MoveStageUseCase {
           ? `Movida para "${newStage.name}". Motivo: ${lostReason}`
           : `Movida para "${newStage.name}"`,
         metadata: {
-          fromStage: prevStage?.name ?? String(opportunity.stageId),
+          fromStage: previousStage?.name ?? String(previousStageId),
           toStage: newStage.name,
           stageKind: newStage.kind,
           lostReason: newStage.kind === "lost" ? lostReason : undefined,
@@ -135,7 +129,7 @@ export class MoveStageUseCase {
         new StageChangedEvent(
           opportunity.id,
           opportunity.personId,
-          prevStage?.id ?? 0,
+          previousStageId,
           newStageId,
           newStage.kind,
           "", // productName será resolvido pelo handler se necessário

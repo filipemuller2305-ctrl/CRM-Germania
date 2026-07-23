@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { z } from "zod";
+import { NextStep } from "@/domain/entities/next-step.entity";
 import { NextStepCompletedEvent } from "@/domain/events";
 import { eventBus } from "@/infrastructure/events/event-bus";
 import type {
@@ -53,7 +54,7 @@ export class CompleteNextStepUseCase {
       if (!parsed.success) {
         return {
           success: false,
-          error: parsed.error.errors.map((e) => e.message).join("; "),
+          error: parsed.error.issues.map((e) => e.message).join("; "),
           errorCode: "VALIDATION",
         };
       }
@@ -109,7 +110,6 @@ export class CompleteNextStepUseCase {
       let newNextStepId: number | undefined;
 
       if (opportunity.isOpen && createNewNextStep.enabled && createNewNextStep.description && createNewNextStep.dueDate) {
-        const { NextStep } = await import("@/domain/entities/next-step.entity");
         const newStep = NextStep.create({
           opportunityId: opportunity.id,
           ownerId: nextStep.ownerId ?? actorId,

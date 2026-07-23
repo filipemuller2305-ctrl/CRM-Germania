@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { eq, and, desc, lt, sql } from "drizzle-orm";
-import { db } from "../index";
+import { db, type Database } from "../index";
 import { activities } from "../schema";
 import { activityToDomain, activityToDb } from "../mappers";
 import { Activity } from "@/domain/entities/activity.entity";
@@ -12,8 +12,10 @@ import type { ActivityRepository, PaginatedResult, PaginationParams } from "@/ap
 const DEFAULT_LIMIT = 20;
 
 export class DrizzleActivityRepository implements ActivityRepository {
+  constructor(private readonly database: Database = db) {}
+
   async findById(id: number): Promise<Activity | null> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(activities)
       .where(eq(activities.id, id))
@@ -35,7 +37,7 @@ export class DrizzleActivityRepository implements ActivityRepository {
       conditions.push(lt(activities.id, cursor));
     }
 
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(activities)
       .where(and(...conditions))
@@ -46,7 +48,7 @@ export class DrizzleActivityRepository implements ActivityRepository {
     const data = rows.slice(0, limit).map(activityToDomain);
     const lastItem = data[data.length - 1];
 
-    const [countResult] = await db
+    const [countResult] = await this.database
       .select({ count: sql<number>`count(*)::int` })
       .from(activities)
       .where(eq(activities.personId, personId));
@@ -62,10 +64,11 @@ export class DrizzleActivityRepository implements ActivityRepository {
   async create(activity: Activity): Promise<Activity> {
     const data = activityToDb(activity);
 
-    const [row] = await db
+    const [row] = await this.database
       .insert(activities)
       .values({
         personId: data.personId!,
+        leadId: data.leadId,
         opportunityId: data.opportunityId,
         ownerId: data.ownerId,
         type: data.type as any,
