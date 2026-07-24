@@ -3,7 +3,12 @@
 // Centraliza a validação de regras que envolvem múltiplas entidades
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { OpportunityStatus } from "../types";
+import {
+  OpportunityCloseOutcome,
+  OpportunityStatus,
+  type OpportunityCloseOutcome as OpportunityCloseOutcomeType,
+  type OpportunityLossReason,
+} from "../types";
 
 /** Dados mínimos de uma etapa do pipeline */
 export interface StageRef {
@@ -57,19 +62,30 @@ export class OpportunityInvariants {
     }
   }
 
-  /**
-   * INV-05: Se fechando como perdida, lostReason é obrigatório.
-   */
-  static assertLostReasonProvided(
+  /** INV-05: encerramento exige classificação e contexto. */
+  static assertCloseDetailsProvided(
     newStatus: OpportunityStatus,
-    lostReason: string | null
+    closeOutcome: OpportunityCloseOutcomeType | null,
+    lossReason: OpportunityLossReason | null,
+    closeNotes: string | null
   ): void {
     if (newStatus === OpportunityStatus.PERDIDA) {
-      if (!lostReason || lostReason.trim().length < 3) {
+      if (!closeOutcome || !lossReason || !closeNotes?.trim()) {
         throw new InvariantViolationError(
-          "INV-05: O motivo da perda é obrigatório ao fechar uma oportunidade como perdida."
+          "INV-05: Desfecho, motivo e observação são obrigatórios ao encerrar uma oportunidade."
         );
       }
+    } else if (
+      newStatus === OpportunityStatus.CANCELADA &&
+      (
+        closeOutcome !==
+          OpportunityCloseOutcome.CANCELAMENTO_ERRO_DUPLICIDADE ||
+        !closeNotes?.trim()
+      )
+    ) {
+      throw new InvariantViolationError(
+        "INV-05: Cancelamento administrativo exige desfecho e observação."
+      );
     }
   }
 
@@ -78,17 +94,22 @@ export class OpportunityInvariants {
    * Transições válidas:
    *   aberta → ganha
    *   aberta → perdida
-   *   perdida → aberta (reabrir)
-   *   ganha → (não pode reabrir — criar nova oportunidade)
+   *   aberta → cancelada
+   * Oportunidade encerrada nunca é reaberta; o retorno cria uma nova.
    */
   static assertValidStatusTransition(
     currentStatus: OpportunityStatus,
     newStatus: OpportunityStatus
   ): void {
     const validTransitions: Record<OpportunityStatus, OpportunityStatus[]> = {
-      [OpportunityStatus.ABERTA]: [OpportunityStatus.GANHA, OpportunityStatus.PERDIDA],
-      [OpportunityStatus.PERDIDA]: [OpportunityStatus.ABERTA],
-      [OpportunityStatus.GANHA]: [], // não pode mudar
+      [OpportunityStatus.ABERTA]: [
+        OpportunityStatus.GANHA,
+        OpportunityStatus.PERDIDA,
+        OpportunityStatus.CANCELADA,
+      ],
+      [OpportunityStatus.PERDIDA]: [],
+      [OpportunityStatus.GANHA]: [],
+      [OpportunityStatus.CANCELADA]: [],
     };
 
     if (currentStatus === newStatus) return; // no-op

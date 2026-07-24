@@ -3,13 +3,12 @@
 // Domain Layer: Types, Enums & Interfaces
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ─── ENUMS ───────────────────────────────────────────────────────────────────
-
+// Pessoa é um cadastro permanente. "Lead" e "Cliente" não são estados da
+// Pessoa: são, respectivamente, um processo de entrada e uma condição derivada
+// da existência de produtos ativos.
 export const PersonStatus = {
-  LEAD: "lead",
-  ATIVO: "ativo",
-  CLIENTE: "cliente",
-  INATIVO: "inativo",
+  ATIVA: "ativa",
+  INATIVA: "inativa",
 } as const;
 export type PersonStatus = (typeof PersonStatus)[keyof typeof PersonStatus];
 
@@ -19,13 +18,116 @@ export const PersonType = {
 } as const;
 export type PersonType = (typeof PersonType)[keyof typeof PersonType];
 
+export const LeadStatus = {
+  NOVO: "novo",
+  EM_QUALIFICACAO: "em_qualificacao",
+  CONVERTIDO: "convertido",
+  DESCARTADO: "descartado",
+  ARQUIVADO: "arquivado",
+} as const;
+export type LeadStatus = (typeof LeadStatus)[keyof typeof LeadStatus];
+
+/** De onde o contato veio. Não confundir com o canal usado para entrar. */
+export const ContactSource = {
+  GOOGLE: "google",
+  INSTAGRAM: "instagram",
+  FACEBOOK: "facebook",
+  INDICACAO: "indicacao",
+  BASE_CLIENTES: "base_clientes",
+  EVENTO: "evento",
+  PROSPECCAO_ATIVA: "prospeccao_ativa",
+  OUTRO: "outro",
+} as const;
+export type ContactSource = (typeof ContactSource)[keyof typeof ContactSource];
+
+/** Meio pelo qual o primeiro contato efetivamente chegou à Germânia. */
+export const EntryChannel = {
+  WHATSAPP: "whatsapp",
+  FORMULARIO_SITE: "formulario_site",
+  TELEFONE: "telefone",
+  EMAIL: "email",
+  DIRECT_INSTAGRAM: "direct_instagram",
+  PRESENCIAL: "presencial",
+  IMPORTACAO: "importacao",
+  OUTRO: "outro",
+} as const;
+export type EntryChannel = (typeof EntryChannel)[keyof typeof EntryChannel];
+
+/**
+ * Fotografia imutável da atribuição comercial no momento em que o processo
+ * nasce. A campanha é texto controlado por cadastro externo, não um enum.
+ */
+export interface AttributionSnapshot {
+  source: ContactSource;
+  channel: EntryChannel;
+  campaign: string | null;
+  referredByPersonId: number | null;
+  sourceDetail: string | null;
+}
+
+export const LeadDiscardReason = {
+  SEM_INTERESSE: "sem_interesse",
+  FORA_DO_PERFIL: "fora_do_perfil",
+  CONTATO_INVALIDO: "contato_invalido",
+  DUPLICADO: "duplicado",
+  NAO_RESPONDEU: "nao_respondeu",
+  OUTRO: "outro",
+} as const;
+export type LeadDiscardReason =
+  (typeof LeadDiscardReason)[keyof typeof LeadDiscardReason];
+
+export const OpportunityType = {
+  NOVO_NEGOCIO: "novo_negocio",
+  RENOVACAO: "renovacao",
+  RECUPERACAO: "recuperacao",
+  CROSS_SELL: "cross_sell",
+  DEMANDA_DIRETA: "demanda_direta",
+} as const;
+export type OpportunityType =
+  (typeof OpportunityType)[keyof typeof OpportunityType];
+
 export const OpportunityStatus = {
   ABERTA: "aberta",
   GANHA: "ganha",
   PERDIDA: "perdida",
+  CANCELADA: "cancelada",
 } as const;
 export type OpportunityStatus =
   (typeof OpportunityStatus)[keyof typeof OpportunityStatus];
+
+export const OpportunityCloseOutcome = {
+  RENOVOU_OUTRA_CORRETORA: "renovou_outra_corretora",
+  RENOVOU_DIRETO_BANCO_SEGURADORA: "renovou_direto_banco_seguradora",
+  CONTRATOU_PROTECAO_VEICULAR: "contratou_protecao_veicular",
+  NAO_RENOVOU_SEGURO: "nao_renovou_seguro",
+  NAO_FOI_POSSIVEL_CONCLUIR: "nao_foi_possivel_concluir",
+  CANCELAMENTO_ERRO_DUPLICIDADE: "cancelamento_erro_duplicidade",
+} as const;
+export type OpportunityCloseOutcome =
+  (typeof OpportunityCloseOutcome)[keyof typeof OpportunityCloseOutcome];
+
+export const OpportunityLossReason = {
+  PRECO: "preco",
+  COBERTURA: "cobertura",
+  CONDICAO_PAGAMENTO: "condicao_pagamento",
+  RELACIONAMENTO_OUTRA_EMPRESA: "relacionamento_outra_empresa",
+  NAO_RESPONDEU: "nao_respondeu",
+  DESISTIU: "desistiu",
+  VENDEU_OU_NAO_POSSUI_BEM: "vendeu_ou_nao_possui_bem",
+  RISCO_RECUSADO: "risco_recusado",
+  DOCUMENTACAO_INCOMPLETA: "documentacao_incompleta",
+  OUTRO: "outro",
+} as const;
+export type OpportunityLossReason =
+  (typeof OpportunityLossReason)[keyof typeof OpportunityLossReason];
+
+export const ScheduledCommercialReturnStatus = {
+  PENDENTE: "pendente",
+  PROCESSADO: "processado",
+  CANCELADO: "cancelado",
+} as const;
+export type ScheduledCommercialReturnStatus =
+  (typeof ScheduledCommercialReturnStatus)[keyof typeof ScheduledCommercialReturnStatus];
 
 export const NextStepStatus = {
   PENDENTE: "pendente",
@@ -103,11 +205,14 @@ export const ProductSource = {
 } as const;
 export type ProductSource = (typeof ProductSource)[keyof typeof ProductSource];
 
-// ─── TIMELINE EVENT TYPES ────────────────────────────────────────────────────
-
 export const TimelineEventType = {
   PERSON_CREATED: "person_created",
   PERSON_UPDATED: "person_updated",
+  LEAD_CREATED: "lead_created",
+  LEAD_QUALIFICATION_STARTED: "lead_qualification_started",
+  LEAD_CONVERTED: "lead_converted",
+  LEAD_DISCARDED: "lead_discarded",
+  LEAD_ARCHIVED: "lead_archived",
   OPPORTUNITY_CREATED: "opportunity_created",
   STAGE_CHANGE: "stage_change",
   NEXT_STEP_CREATED: "next_step_created",
@@ -118,6 +223,9 @@ export const TimelineEventType = {
   FOLLOW_UP: "follow_up",
   CLOSED_WON: "closed_won",
   CLOSED_LOST: "closed_lost",
+  CLOSED_CANCELLED: "closed_cancelled",
+  COMMERCIAL_RETURN_SCHEDULED: "commercial_return_scheduled",
+  COMMERCIAL_RETURN_ACTIVATED: "commercial_return_activated",
   RENEWAL: "renewal",
   CROSS_SELL: "cross_sell",
   CUSTOMER_SUCCESS: "customer_success",
@@ -128,23 +236,6 @@ export const TimelineEventType = {
 export type TimelineEventType =
   (typeof TimelineEventType)[keyof typeof TimelineEventType];
 
-// ─── ORIGIN OPTIONS ──────────────────────────────────────────────────────────
-
-export const OriginOptions = [
-  "Indicação",
-  "Site",
-  "Redes Sociais",
-  "Telefone",
-  "Loja Física",
-  "Evento",
-  "Renovação Automática",
-  "Cross Selling",
-  "Outro",
-] as const;
-export type Origin = (typeof OriginOptions)[number];
-
-// ─── CUSTOMER SUCCESS STAGE ORDER ────────────────────────────────────────────
-
 export const CS_STAGE_ORDER: CustomerSuccessStageType[] = [
   CustomerSuccessStageType.BOAS_VINDAS,
   CustomerSuccessStageType.CONFIRMACAO_APOLICE,
@@ -154,12 +245,11 @@ export const CS_STAGE_ORDER: CustomerSuccessStageType[] = [
   CustomerSuccessStageType.RENOVACAO_FUTURA,
 ];
 
-/** Offsets em dias a partir do fechamento para cada etapa de CS */
 export const CS_STAGE_DUE_OFFSETS: Record<CustomerSuccessStageType, number> = {
   [CustomerSuccessStageType.BOAS_VINDAS]: 1,
   [CustomerSuccessStageType.CONFIRMACAO_APOLICE]: 3,
   [CustomerSuccessStageType.PRIMEIRO_CONTATO]: 7,
   [CustomerSuccessStageType.PESQUISA_SATISFACAO]: 15,
   [CustomerSuccessStageType.ACOMPANHAMENTO]: 30,
-  [CustomerSuccessStageType.RENOVACAO_FUTURA]: 300, // ~10 meses (antes da renovação)
+  [CustomerSuccessStageType.RENOVACAO_FUTURA]: 300,
 };

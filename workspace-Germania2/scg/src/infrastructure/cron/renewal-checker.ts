@@ -1,20 +1,20 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// Cron Job: Renewal Checker
-// Roda diariamente. Detecta produtos na janela de renovação e cria
-// oportunidades automáticas (INV-09).
-// ═══════════════════════════════════════════════════════════════════════════
-
-import { RenewalDetector, RENEWAL_WINDOW_DAYS } from "@/domain/services/renewal-detector";
-import { Opportunity } from "@/domain/entities/opportunity.entity";
 import { NextStep } from "@/domain/entities/next-step.entity";
-import { RenewalApproachingEvent, RenewalOpportunityCreatedEvent } from "@/domain/events";
-import { eventBus } from "@/infrastructure/events/event-bus";
+import { Opportunity } from "@/domain/entities/opportunity.entity";
+import {
+  ContactSource,
+  EntryChannel,
+  OpportunityType,
+} from "@/domain/types";
+import {
+  RENEWAL_WINDOW_DAYS,
+  RenewalDetector,
+} from "@/domain/services/renewal-detector";
 import type {
-  PersonProductRepository,
   OpportunityRepository,
-  NextStepRepository,
+  PersonProductRepository,
+  PersonRepository,
   PipelineRepository,
-  TimelineRepository,
+  TransactionManager,
 } from "@/application/ports";
 
 export interface RenewalCheckerResult {
@@ -28,136 +28,128 @@ export class RenewalCheckerCron {
   private readonly detector = new RenewalDetector();
 
   constructor(
-    private personProductRepo: PersonProductRepository,
-    private opportunityRepo: OpportunityRepository,
-    private nextStepRepo: NextStepRepository,
-    private pipelineRepo: PipelineRepository,
-    private timelineRepo: TimelineRepository
+    private readonly personProductRepo: PersonProductRepository,
+    private readonly opportunityRepo: OpportunityRepository,
+    private readonly personRepo: PersonRepository,
+    private readonly pipelineRepo: PipelineRepository,
+    private readonly transaction: TransactionManager
   ) {}
 
-  /**
-   * Executa a verificação de renovações.
-   * Chamado via cron (ex: Vercel Cron, GitHub Actions, ou /api/cron/renewals).
-   */
   async execute(): Promise<RenewalCheckerResult> {
     const errors: string[] = [];
     let opportunitiesCreated = 0;
 
     try {
-      // 1. Busca todos os produtos ativos com renewal_date na janela
-      const products = await this.personProductRepo.findRenewable(RENEWAL_WINDOW_DAYS);
+      const [products, existing, defaultPipeline] = await Promise.all([
+        this.personProductRepo.findRenewable(RENEWAL_WINDOW_DAYS),
+        this.opportunityRepo.listRenewals(),
+        this.pipelineRepo.getDefaultPipeline(),
+      ]);
+      const existingRenewals = existing
+        .filter((opportunity) => opportunity.renewalKey)
+        .map((opportunity) => ({ renewalKey: opportunity.renewalKey! }));
 
-      // 2. Busca todas as oportunidades abertas (para evitar duplicatas)
-      const openOpps = await this.opportunityRepo.listOpen({ limit: 10000 });
-      const openOppRefs = openOpps.data.map((o) => ({
-        personId: o.personId,
-        productTypeId: o.productTypeId,
-      }));
+      const enriched = await Promise.all(
+        products.map(async (product) => {
+          const person = await this.personRepo.findById(product.personId);
+          return {
+            personProductId: product.id,
+            personId: product.personId,
+            personName: person?.name ?? `Pessoa ${product.personId}`,
+            productTypeId: product.productTypeId,
+            productTypeName: `Produto ${product.productTypeId}`,
+            renewalDate: product.renewalDate!,
+            status: product.status,
+            ownerId: person?.relationshipOwnerId ?? null,
+          };
+        })
+      );
+      const candidates = this.detector.detect(enriched, existingRenewals);
 
-      // 3. Detecta candidatos
-      // NOTA: Em produção, o repositório deve retornar dados enriquecidos.
-      // Aqui simulamos a interface esperada pelo detector.
-      const renewableProducts = products.map((p) => ({
-        personProductId: p.id,
-        personId: p.personId,
-        personName: "", // será resolvido pelo repositório em produção
-        productTypeId: p.productTypeId,
-        productTypeName: "", // será resolvido pelo repositório em produção
-        renewalDate: p.renewalDate!,
-        status: p.status,
-        ownerId: null, // será resolvido pelo repositório
-      }));
-
-      const candidates = this.detector.detect(renewableProducts, openOppRefs);
-
-      // 4. Para cada candidato, cria oportunidade de renovação
-      const defaultPipeline = await this.pipelineRepo.getDefaultPipeline();
       if (!defaultPipeline && candidates.length > 0) {
-        errors.push("Pipeline padrão não configurado. Não é possível criar oportunidades de renovação.");
         return {
           scannedProducts: products.length,
           candidatesFound: candidates.length,
           opportunitiesCreated: 0,
-          errors,
+          errors: ["Pipeline padrão não configurado"],
         };
       }
+      const stages = defaultPipeline
+        ? await this.pipelineRepo.getStagesByPipeline(defaultPipeline.id)
+        : [];
+      const initialStage = stages.find((stage) => stage.kind === "open");
 
       for (const candidate of candidates) {
+        if (!candidate.ownerId) {
+          errors.push(
+            `Pessoa ${candidate.personId} não possui responsável pelo relacionamento`
+          );
+          continue;
+        }
+        if (!initialStage || !defaultPipeline) {
+          errors.push("Pipeline padrão não possui etapa aberta");
+          break;
+        }
+
         try {
-          // Busca a primeira etapa do pipeline padrão
-          const stages = await this.pipelineRepo.getStagesByPipeline(defaultPipeline!.id);
-          const firstStage = stages.find((s) => s.kind === "open");
-          if (!firstStage) {
-            errors.push(`Pipeline ${defaultPipeline!.id} não tem etapa inicial do tipo "open"`);
-            continue;
-          }
+          const created = await this.transaction.run(async (repositories) => {
+            const duplicate =
+              await repositories.opportunity.findByRenewalKey(
+                candidate.renewalKey
+              );
+            if (duplicate) return false;
 
-          // Cria oportunidade de renovação
-          const opportunity = Opportunity.create({
-            personId: candidate.personId,
-            productTypeId: candidate.productTypeId,
-            pipelineId: defaultPipeline!.id,
-            stageId: firstStage.id,
-            ownerId: candidate.ownerId,
-            origin: "Renovação Automática",
-            notes: `Renovação automática detectada. Vencimento em ${candidate.daysUntilRenewal} dias (${candidate.renewalDate.toLocaleDateString("pt-BR")}).`,
-          });
-
-          const savedOpp = await this.opportunityRepo.create(opportunity);
-
-          // Cria next step (INV-02)
-          const nextStepDue = RenewalDetector.nextStepDueDate(candidate.renewalDate);
-          const nextStep = NextStep.create({
-            opportunityId: savedOpp.id,
-            ownerId: candidate.ownerId,
-            description: `Entrar em contato com ${candidate.personName} sobre renovação do seguro`,
-            dueDate: nextStepDue,
-            objective: `Garantir renovação antes do vencimento em ${candidate.renewalDate.toLocaleDateString("pt-BR")}`,
-          });
-
-          await this.nextStepRepo.create(nextStep);
-
-          // Timeline
-          await this.timelineRepo.add({
-            personId: candidate.personId,
-            opportunityId: savedOpp.id,
-            actorId: null, // sistema
-            type: "renewal",
-            title: "Oportunidade de renovação criada automaticamente",
-            description: `Seguro vence em ${candidate.daysUntilRenewal} dias. Oportunidade criada pelo sistema.`,
-            metadata: {
-              renewalDate: candidate.renewalDate.toISOString().split("T")[0],
-              daysUntilRenewal: candidate.daysUntilRenewal,
+            const opportunity = Opportunity.create({
+              personId: candidate.personId,
               personProductId: candidate.personProductId,
-            },
+              productTypeId: candidate.productTypeId,
+              pipelineId: defaultPipeline.id,
+              stageId: initialStage.id,
+              ownerId: candidate.ownerId!,
+              createdById: null,
+              type: OpportunityType.RENOVACAO,
+              attribution: {
+                source: ContactSource.BASE_CLIENTES,
+                channel: EntryChannel.IMPORTACAO,
+                campaign: null,
+                referredByPersonId: null,
+                sourceDetail: "Renovação automática",
+              },
+              renewalKey: candidate.renewalKey,
+              notes: `Ciclo com vencimento em ${candidate.renewalDate.toLocaleDateString("pt-BR")}.`,
+            });
+            const savedOpportunity =
+              await repositories.opportunity.create(opportunity);
+
+            const nextStep = NextStep.create({
+              opportunityId: savedOpportunity.id,
+              ownerId: candidate.ownerId,
+              description: `Contatar ${candidate.personName} sobre a renovação`,
+              dueDate: RenewalDetector.nextStepDueDate(candidate.renewalDate),
+              objective: "Apresentar e concluir a renovação antes do vencimento",
+            });
+            await repositories.nextStep.create(nextStep);
+            await repositories.timeline.add({
+              personId: candidate.personId,
+              opportunityId: savedOpportunity.id,
+              actorId: null,
+              type: "renewal",
+              title: "Oportunidade de renovação criada",
+              description: `Ciclo ${candidate.renewalKey} criado automaticamente.`,
+              metadata: {
+                personProductId: candidate.personProductId,
+                renewalDate: candidate.renewalDate.toISOString().slice(0, 10),
+              },
+            });
+            return true;
           });
-
-          // Eventos
-          await eventBus.emit(
-            new RenewalApproachingEvent(
-              candidate.personProductId,
-              candidate.personId,
-              candidate.personName,
-              candidate.productTypeId,
-              candidate.renewalDate,
-              candidate.daysUntilRenewal
-            )
+          if (created) opportunitiesCreated++;
+        } catch (error) {
+          errors.push(
+            `Renovação ${candidate.renewalKey}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
           );
-
-          await eventBus.emit(
-            new RenewalOpportunityCreatedEvent(
-              savedOpp.id,
-              candidate.personId,
-              candidate.productTypeId,
-              candidate.renewalDate
-            )
-          );
-
-          opportunitiesCreated++;
-        } catch (err) {
-          const msg = `Erro ao criar renovação para pessoa ${candidate.personId}: ${err instanceof Error ? err.message : String(err)}`;
-          errors.push(msg);
-          console.error(`[RenewalChecker] ${msg}`);
         }
       }
 
@@ -168,13 +160,13 @@ export class RenewalCheckerCron {
         errors,
       };
     } catch (error) {
-      const msg = `Erro fatal no RenewalChecker: ${error instanceof Error ? error.message : String(error)}`;
-      console.error(`[RenewalChecker] ${msg}`);
       return {
         scannedProducts: 0,
         candidatesFound: 0,
         opportunitiesCreated: 0,
-        errors: [msg],
+        errors: [
+          error instanceof Error ? error.message : "Erro no processo de renovação",
+        ],
       };
     }
   }

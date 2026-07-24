@@ -4,18 +4,31 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { Person, type PersonProps } from "@/domain/entities/person.entity";
+import { Lead, type LeadProps } from "@/domain/entities/lead.entity";
 import { Opportunity, type OpportunityProps } from "@/domain/entities/opportunity.entity";
 import { NextStep, type NextStepProps } from "@/domain/entities/next-step.entity";
 import { Activity, type ActivityProps } from "@/domain/entities/activity.entity";
 import { PersonProduct, type PersonProductProps } from "@/domain/entities/person-product.entity";
 import { CustomerSuccessStage, type CustomerSuccessStageProps } from "@/domain/entities/customer-success-stage.entity";
+import {
+  ScheduledCommercialReturn,
+  type ScheduledCommercialReturnProps,
+} from "@/domain/entities/scheduled-commercial-return.entity";
 import { CpfCnpj } from "@/domain/value-objects/cpf-cnpj";
 import { Phone } from "@/domain/value-objects/phone";
 import { Money } from "@/domain/value-objects/money";
 import type {
   PersonStatus,
   PersonType,
+  ContactSource,
+  EntryChannel,
+  LeadDiscardReason,
+  LeadStatus,
+  OpportunityType,
   OpportunityStatus,
+  OpportunityCloseOutcome,
+  OpportunityLossReason,
+  ScheduledCommercialReturnStatus,
   NextStepStatus,
   ActivityType,
   ProductStatus,
@@ -55,9 +68,8 @@ export function personToDomain(row: PersonRow): Person {
     whatsapp: row.whatsapp ? Phone.optional(row.whatsapp) : null,
     email: row.email,
     document: row.document ? CpfCnpj.fromErp(row.document) : null,
-    origin: row.origin as any,
     status: row.status as PersonStatus,
-    ownerId: row.ownerId,
+    relationshipOwnerId: row.relationshipOwnerId,
     notes: row.notes,
     erpCustomerId: row.erpCustomerId,
     createdAt: row.createdAt,
@@ -73,13 +85,45 @@ export function personToDb(person: Person): Partial<PersonRow> {
     whatsapp: person.whatsapp?.value ?? null,
     email: person.email,
     document: person.documentValue,
-    origin: person.origin,
     status: person.status,
-    ownerId: person.ownerId,
+    relationshipOwnerId: person.relationshipOwnerId,
     notes: person.notes,
     erpCustomerId: person.erpCustomerId,
     updatedAt: new Date(),
   };
+}
+
+// ─── LEAD ────────────────────────────────────────────────────────────────────
+
+type LeadRow = typeof S.leads.$inferSelect;
+
+export function leadToDomain(row: LeadRow): Lead {
+  return Lead.reconstitute({
+    id: row.id,
+    personId: row.personId,
+    productTypeId: row.productTypeId,
+    source: row.source as ContactSource,
+    channel: row.channel as EntryChannel,
+    campaign: row.campaign,
+    referredByPersonId: row.referredByPersonId,
+    sourceDetail: row.sourceDetail,
+    capturedById: row.capturedById,
+    ownerId: row.ownerId,
+    status: row.status as LeadStatus,
+    opportunityId: row.opportunityId,
+    discardReason: row.discardReason as LeadDiscardReason | null,
+    discardNotes: row.discardNotes,
+    createdAt: row.createdAt,
+    qualificationStartedAt: parseDate(row.qualificationStartedAt),
+    qualifiedAt: parseDate(row.qualifiedAt),
+    convertedAt: parseDate(row.convertedAt),
+    discardedAt: parseDate(row.discardedAt),
+    archivedAt: parseDate(row.archivedAt),
+  } as LeadProps);
+}
+
+export function leadToDb(lead: Lead): typeof S.leads.$inferInsert {
+  return lead.toPersistence();
 }
 
 // ─── OPPORTUNITY ─────────────────────────────────────────────────────────────
@@ -90,15 +134,31 @@ export function opportunityToDomain(row: OpportunityRow): Opportunity {
   return Opportunity.reconstitute({
     id: row.id,
     personId: row.personId,
+    leadId: row.leadId,
+    personProductId: row.personProductId,
+    crossSellSuggestionId: row.crossSellSuggestionId,
     productTypeId: row.productTypeId,
     pipelineId: row.pipelineId,
     stageId: row.stageId,
     ownerId: row.ownerId,
+    createdById: row.createdById,
+    type: row.type as OpportunityType,
     estimatedValue: row.estimatedValue ? Money.fromReais(Number(row.estimatedValue)) : null,
     probability: row.probability,
-    origin: row.origin as any,
+    attribution: {
+      source: row.source as ContactSource,
+      channel: row.channel as EntryChannel,
+      campaign: row.campaign,
+      referredByPersonId: row.referredByPersonId,
+      sourceDetail: row.sourceDetail,
+    },
+    renewalKey: row.renewalKey,
+    recoveryKey: row.recoveryKey,
     status: row.status as OpportunityStatus,
-    lostReason: row.lostReason,
+    closeOutcome: row.closeOutcome as OpportunityCloseOutcome | null,
+    lossReason: row.lossReason as OpportunityLossReason | null,
+    closeNotes: row.closeNotes,
+    nextExpirationDate: parseDateOnly(row.nextExpirationDate),
     notes: row.notes,
     createdAt: row.createdAt,
     lastMovementAt: row.lastMovementAt,
@@ -109,18 +169,78 @@ export function opportunityToDomain(row: OpportunityRow): Opportunity {
 export function opportunityToDb(opp: Opportunity): Partial<OpportunityRow> {
   return {
     personId: opp.personId,
+    leadId: opp.leadId,
+    personProductId: opp.personProductId,
+    crossSellSuggestionId: opp.crossSellSuggestionId,
     productTypeId: opp.productTypeId,
     pipelineId: opp.pipelineId,
     stageId: opp.stageId,
     ownerId: opp.ownerId,
+    createdById: opp.createdById,
+    type: opp.type,
     estimatedValue: opp.estimatedValue ? String(opp.estimatedValue.reais) : null,
     probability: opp.probability,
-    origin: opp.origin,
+    source: opp.attribution.source,
+    channel: opp.attribution.channel,
+    campaign: opp.attribution.campaign,
+    referredByPersonId: opp.attribution.referredByPersonId,
+    sourceDetail: opp.attribution.sourceDetail,
+    renewalKey: opp.renewalKey,
+    recoveryKey: opp.recoveryKey,
     status: opp.status,
-    lostReason: opp.lostReason,
+    closeOutcome: opp.closeOutcome,
+    lossReason: opp.lossReason,
+    closeNotes: opp.closeNotes,
+    nextExpirationDate: toDateString(opp.nextExpirationDate),
     notes: opp.notes,
     lastMovementAt: opp.lastMovementAt,
     closedAt: opp.closedAt,
+  };
+}
+
+// ─── SCHEDULED COMMERCIAL RETURN ─────────────────────────────────────────────
+
+type ScheduledCommercialReturnRow =
+  typeof S.scheduledCommercialReturns.$inferSelect;
+
+export function scheduledCommercialReturnToDomain(
+  row: ScheduledCommercialReturnRow
+): ScheduledCommercialReturn {
+  return ScheduledCommercialReturn.reconstitute({
+    id: row.id,
+    personId: row.personId,
+    sourceOpportunityId: row.sourceOpportunityId,
+    createdOpportunityId: row.createdOpportunityId,
+    productTypeId: row.productTypeId,
+    ownerId: row.ownerId,
+    closeOutcome: row.closeOutcome as OpportunityCloseOutcome,
+    nextExpirationDate: parseDateOnly(row.nextExpirationDate)!,
+    scheduledFor: parseDateOnly(row.scheduledFor)!,
+    notes: row.notes,
+    status: row.status as ScheduledCommercialReturnStatus,
+    createdAt: row.createdAt,
+    processedAt: parseDate(row.processedAt),
+    cancelledAt: parseDate(row.cancelledAt),
+  } as ScheduledCommercialReturnProps);
+}
+
+export function scheduledCommercialReturnToDb(
+  commercialReturn: ScheduledCommercialReturn
+): typeof S.scheduledCommercialReturns.$inferInsert {
+  const data = commercialReturn.toPersistence();
+  return {
+    personId: data.personId,
+    sourceOpportunityId: data.sourceOpportunityId,
+    createdOpportunityId: data.createdOpportunityId,
+    productTypeId: data.productTypeId,
+    ownerId: data.ownerId,
+    closeOutcome: data.closeOutcome,
+    nextExpirationDate: toDateString(data.nextExpirationDate)!,
+    scheduledFor: toDateString(data.scheduledFor)!,
+    notes: data.notes,
+    status: data.status,
+    processedAt: data.processedAt,
+    cancelledAt: data.cancelledAt,
   };
 }
 
@@ -164,6 +284,7 @@ export function activityToDomain(row: ActivityRow): Activity {
   return Activity.reconstitute({
     id: row.id,
     personId: row.personId,
+    leadId: row.leadId,
     opportunityId: row.opportunityId,
     ownerId: row.ownerId,
     type: row.type as ActivityType,
@@ -175,6 +296,7 @@ export function activityToDomain(row: ActivityRow): Activity {
 export function activityToDb(act: Activity): Partial<ActivityRow> {
   return {
     personId: act.personId,
+    leadId: act.leadId,
     opportunityId: act.opportunityId,
     ownerId: act.ownerId,
     type: act.type,

@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { eq, and, desc, lt, sql } from "drizzle-orm";
-import { db } from "../index";
+import { db, type Database } from "../index";
 import { opportunities } from "../schema";
 import { opportunityToDomain, opportunityToDb } from "../mappers";
 import { Opportunity } from "@/domain/entities/opportunity.entity";
@@ -12,8 +12,10 @@ import type { OpportunityRepository, PaginatedResult, PaginationParams } from "@
 const DEFAULT_LIMIT = 50;
 
 export class DrizzleOpportunityRepository implements OpportunityRepository {
+  constructor(private readonly database: Database = db) {}
+
   async findById(id: number): Promise<Opportunity | null> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(opportunities)
       .where(eq(opportunities.id, id))
@@ -23,7 +25,7 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
   }
 
   async findByPersonId(personId: number): Promise<Opportunity[]> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(opportunities)
       .where(eq(opportunities.personId, personId))
@@ -32,11 +34,47 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
     return rows.map(opportunityToDomain);
   }
 
+  async findByLeadId(leadId: number): Promise<Opportunity | null> {
+    const rows = await this.database
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.leadId, leadId))
+      .limit(1);
+    return rows[0] ? opportunityToDomain(rows[0]) : null;
+  }
+
+  async findByRenewalKey(renewalKey: string): Promise<Opportunity | null> {
+    const rows = await this.database
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.renewalKey, renewalKey))
+      .limit(1);
+    return rows[0] ? opportunityToDomain(rows[0]) : null;
+  }
+
+  async findByRecoveryKey(recoveryKey: string): Promise<Opportunity | null> {
+    const rows = await this.database
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.recoveryKey, recoveryKey))
+      .limit(1);
+    return rows[0] ? opportunityToDomain(rows[0]) : null;
+  }
+
+  async listRenewals(): Promise<Opportunity[]> {
+    const rows = await this.database
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.type, "renovacao"))
+      .orderBy(desc(opportunities.createdAt));
+    return rows.map(opportunityToDomain);
+  }
+
   async findOpenByPersonAndProduct(
     personId: number,
     productTypeId: number
   ): Promise<Opportunity | null> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(opportunities)
       .where(
@@ -52,7 +90,7 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
   }
 
   async listByPipeline(pipelineId: number): Promise<Opportunity[]> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(opportunities)
       .where(
@@ -76,7 +114,7 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
       conditions.push(lt(opportunities.id, cursor));
     }
 
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(opportunities)
       .where(and(...conditions))
@@ -87,7 +125,7 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
     const data = rows.slice(0, limit).map(opportunityToDomain);
     const lastItem = data[data.length - 1];
 
-    const [countResult] = await db
+    const [countResult] = await this.database
       .select({ count: sql<number>`count(*)::int` })
       .from(opportunities)
       .where(eq(opportunities.status, "aberta"));
@@ -103,19 +141,33 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
   async create(opportunity: Opportunity): Promise<Opportunity> {
     const data = opportunityToDb(opportunity);
 
-    const [row] = await db
+    const [row] = await this.database
       .insert(opportunities)
       .values({
         personId: data.personId!,
+        leadId: data.leadId,
+        personProductId: data.personProductId,
+        crossSellSuggestionId: data.crossSellSuggestionId,
         productTypeId: data.productTypeId!,
         pipelineId: data.pipelineId!,
         stageId: data.stageId!,
-        ownerId: data.ownerId,
+        ownerId: data.ownerId!,
+        createdById: data.createdById,
+        type: data.type!,
         estimatedValue: data.estimatedValue,
         probability: data.probability!,
-        origin: data.origin,
+        source: data.source!,
+        channel: data.channel!,
+        campaign: data.campaign,
+        referredByPersonId: data.referredByPersonId,
+        sourceDetail: data.sourceDetail,
+        renewalKey: data.renewalKey,
+        recoveryKey: data.recoveryKey,
         status: data.status as any,
-        lostReason: data.lostReason,
+        closeOutcome: data.closeOutcome,
+        lossReason: data.lossReason,
+        closeNotes: data.closeNotes,
+        nextExpirationDate: data.nextExpirationDate,
         notes: data.notes,
       })
       .returning();
@@ -126,7 +178,7 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
   async update(opportunity: Opportunity): Promise<Opportunity> {
     const data = opportunityToDb(opportunity);
 
-    const [row] = await db
+    const [row] = await this.database
       .update(opportunities)
       .set({
         stageId: data.stageId,
@@ -134,7 +186,10 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
         estimatedValue: data.estimatedValue,
         probability: data.probability,
         status: data.status as any,
-        lostReason: data.lostReason,
+        closeOutcome: data.closeOutcome,
+        lossReason: data.lossReason,
+        closeNotes: data.closeNotes,
+        nextExpirationDate: data.nextExpirationDate,
         notes: data.notes,
         lastMovementAt: data.lastMovementAt,
         closedAt: data.closedAt,
@@ -146,7 +201,7 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
   }
 
   async countOpenByOwner(ownerId: number): Promise<number> {
-    const [result] = await db
+    const [result] = await this.database
       .select({ count: sql<number>`count(*)::int` })
       .from(opportunities)
       .where(

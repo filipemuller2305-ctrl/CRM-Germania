@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { eq, and, lt, sql } from "drizzle-orm";
-import { db } from "../index";
+import { db, type Database } from "../index";
 import { nextSteps } from "../schema";
 import { nextStepToDomain, nextStepToDb } from "../mappers";
 import { NextStep } from "@/domain/entities/next-step.entity";
@@ -14,8 +14,10 @@ function todayISO(): string {
 }
 
 export class DrizzleNextStepRepository implements NextStepRepository {
+  constructor(private readonly database: Database = db) {}
+
   async findById(id: number): Promise<NextStep | null> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(nextSteps)
       .where(eq(nextSteps.id, id))
@@ -25,7 +27,7 @@ export class DrizzleNextStepRepository implements NextStepRepository {
   }
 
   async findPendingByOpportunity(opportunityId: number): Promise<NextStep[]> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(nextSteps)
       .where(
@@ -39,7 +41,7 @@ export class DrizzleNextStepRepository implements NextStepRepository {
   }
 
   async findPendingByOwner(ownerId: number): Promise<NextStep[]> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(nextSteps)
       .where(
@@ -55,7 +57,7 @@ export class DrizzleNextStepRepository implements NextStepRepository {
   async findOverdue(): Promise<NextStep[]> {
     const today = todayISO();
 
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(nextSteps)
       .where(
@@ -80,7 +82,7 @@ export class DrizzleNextStepRepository implements NextStepRepository {
       conditions.push(eq(nextSteps.ownerId, ownerId));
     }
 
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(nextSteps)
       .where(and(...conditions));
@@ -91,7 +93,7 @@ export class DrizzleNextStepRepository implements NextStepRepository {
   async create(nextStep: NextStep): Promise<NextStep> {
     const data = nextStepToDb(nextStep);
 
-    const [row] = await db
+    const [row] = await this.database
       .insert(nextSteps)
       .values({
         opportunityId: data.opportunityId!,
@@ -110,7 +112,7 @@ export class DrizzleNextStepRepository implements NextStepRepository {
   async update(nextStep: NextStep): Promise<NextStep> {
     const data = nextStepToDb(nextStep);
 
-    const [row] = await db
+    const [row] = await this.database
       .update(nextSteps)
       .set({
         description: data.description,

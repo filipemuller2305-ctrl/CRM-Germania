@@ -6,19 +6,14 @@
 
 import type { OpportunityWonEvent } from "@/domain/events";
 import { CustomerSuccessStage } from "@/domain/entities/customer-success-stage.entity";
-import { PersonStatus } from "@/domain/types";
 import type {
   CustomerSuccessRepository,
-  PersonRepository,
-  PersonProductRepository,
   TimelineRepository,
 } from "@/application/ports";
 
 export class OnOpportunityWonHandler {
   constructor(
     private csRepo: CustomerSuccessRepository,
-    private personRepo: PersonRepository,
-    private personProductRepo: PersonProductRepository,
     private timelineRepo: TimelineRepository
   ) {}
 
@@ -36,22 +31,8 @@ export class OnOpportunityWonHandler {
 
     await this.csRepo.createMany(csStages);
 
-    // ─── 2. Atualiza status da Pessoa para "cliente" se necessário ─────────
-    const person = await this.personRepo.findById(personId);
-    if (person && person.status !== PersonStatus.CLIENTE) {
-      person.markAsClient();
-      await this.personRepo.update(person);
-
-      await this.timelineRepo.add({
-        personId,
-        actorId: event.actorId,
-        type: "person_updated",
-        title: "Status alterado para Cliente",
-        description: `${person.name} agora é cliente Germânia Seguros. 🎉`,
-      });
-    }
-
-    // ─── 3. Timeline de Customer Success iniciado ──────────────────────────
+    // Cliente é uma condição derivada de produto ativo; não alteramos Pessoa.
+    // ─── 2. Timeline de Customer Success iniciado ──────────────────────────
     await this.timelineRepo.add({
       personId,
       opportunityId,

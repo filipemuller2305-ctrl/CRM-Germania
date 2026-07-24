@@ -17,15 +17,15 @@ import {
   uniqueIndex,
   index,
   pgEnum,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // ─── ENUMS ───────────────────────────────────────────────────────────────────
 
 export const personStatusEnum = pgEnum("person_status", [
-  "lead",
-  "ativo",
-  "cliente",
-  "inativo",
+  "ativa",
+  "inativa",
 ]);
 
 export const personTypeEnum = pgEnum("person_type", ["PF", "PJ"]);
@@ -34,7 +34,85 @@ export const opportunityStatusEnum = pgEnum("opportunity_status", [
   "aberta",
   "ganha",
   "perdida",
+  "cancelada",
 ]);
+
+export const leadStatusEnum = pgEnum("lead_status", [
+  "novo",
+  "em_qualificacao",
+  "convertido",
+  "descartado",
+  "arquivado",
+]);
+
+export const contactSourceEnum = pgEnum("contact_source", [
+  "google",
+  "instagram",
+  "facebook",
+  "indicacao",
+  "base_clientes",
+  "evento",
+  "prospeccao_ativa",
+  "outro",
+]);
+
+export const entryChannelEnum = pgEnum("entry_channel", [
+  "whatsapp",
+  "formulario_site",
+  "telefone",
+  "email",
+  "direct_instagram",
+  "presencial",
+  "importacao",
+  "outro",
+]);
+
+export const leadDiscardReasonEnum = pgEnum("lead_discard_reason", [
+  "sem_interesse",
+  "fora_do_perfil",
+  "contato_invalido",
+  "duplicado",
+  "nao_respondeu",
+  "outro",
+]);
+
+export const opportunityTypeEnum = pgEnum("opportunity_type", [
+  "novo_negocio",
+  "renovacao",
+  "recuperacao",
+  "cross_sell",
+  "demanda_direta",
+]);
+
+export const opportunityCloseOutcomeEnum = pgEnum(
+  "opportunity_close_outcome",
+  [
+    "renovou_outra_corretora",
+    "renovou_direto_banco_seguradora",
+    "contratou_protecao_veicular",
+    "nao_renovou_seguro",
+    "nao_foi_possivel_concluir",
+    "cancelamento_erro_duplicidade",
+  ]
+);
+
+export const opportunityLossReasonEnum = pgEnum("opportunity_loss_reason", [
+  "preco",
+  "cobertura",
+  "condicao_pagamento",
+  "relacionamento_outra_empresa",
+  "nao_respondeu",
+  "desistiu",
+  "vendeu_ou_nao_possui_bem",
+  "risco_recusado",
+  "documentacao_incompleta",
+  "outro",
+]);
+
+export const scheduledCommercialReturnStatusEnum = pgEnum(
+  "scheduled_commercial_return_status",
+  ["pendente", "processado", "cancelado"]
+);
 
 export const nextStepStatusEnum = pgEnum("next_step_status", [
   "pendente",
@@ -115,9 +193,10 @@ export const people = pgTable(
     whatsapp: text("whatsapp"),
     email: text("email"),
     document: text("document"), // CPF/CNPJ — apenas dígitos (INV-01: unique)
-    origin: text("origin"),
-    status: personStatusEnum("status").notNull().default("lead"),
-    ownerId: integer("owner_id").references(() => users.id),
+    status: personStatusEnum("status").notNull().default("ativa"),
+    relationshipOwnerId: integer("relationship_owner_id").references(
+      () => users.id
+    ),
     notes: text("notes"),
     erpCustomerId: text("erp_customer_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -126,9 +205,63 @@ export const people = pgTable(
   (table) => [
     // INV-01: Documento único (permite múltiplos NULLs)
     uniqueIndex("idx_people_document_unique").on(table.document),
-    index("idx_people_owner").on(table.ownerId),
+    index("idx_people_relationship_owner").on(table.relationshipOwnerId),
     index("idx_people_status").on(table.status),
     index("idx_people_name").on(table.name),
+  ]
+);
+
+// ─── LEADS ──────────────────────────────────────────────────────────────────
+
+export const leads = pgTable(
+  "leads",
+  {
+    id: serial("id").primaryKey(),
+    personId: integer("person_id")
+      .notNull()
+      .references(() => people.id),
+    productTypeId: integer("product_type_id").references(() => productTypes.id),
+    source: contactSourceEnum("source").notNull(),
+    channel: entryChannelEnum("channel").notNull(),
+    campaign: text("campaign"),
+    referredByPersonId: integer("referred_by_person_id").references(
+      () => people.id
+    ),
+    sourceDetail: text("source_detail"),
+    capturedById: integer("captured_by_id")
+      .notNull()
+      .references(() => users.id),
+    ownerId: integer("owner_id").references(() => users.id),
+    status: leadStatusEnum("status").notNull().default("novo"),
+    // A relação inversa é protegida por UNIQUE(opportunities.lead_id).
+    // Mantemos o ID aqui para leitura rápida e auditoria da conversão.
+    opportunityId: integer("opportunity_id"),
+    discardReason: leadDiscardReasonEnum("discard_reason"),
+    discardNotes: text("discard_notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    qualificationStartedAt: timestamp("qualification_started_at", {
+      withTimezone: true,
+    }),
+    qualifiedAt: timestamp("qualified_at", { withTimezone: true }),
+    convertedAt: timestamp("converted_at", { withTimezone: true }),
+    discardedAt: timestamp("discarded_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_leads_person").on(table.personId),
+    index("idx_leads_owner_status").on(table.ownerId, table.status),
+    index("idx_leads_source_channel").on(table.source, table.channel),
+    uniqueIndex("idx_leads_opportunity_unique").on(table.opportunityId),
+    check(
+      "leads_no_self_referral",
+      sql`${table.referredByPersonId} IS NULL OR ${table.referredByPersonId} <> ${table.personId}`
+    ),
+    check(
+      "leads_indication_identified",
+      sql`${table.source} <> 'indicacao' OR ${table.referredByPersonId} IS NOT NULL OR nullif(btrim(${table.sourceDetail}), '') IS NOT NULL`
+    ),
   ]
 );
 
@@ -207,6 +340,11 @@ export const opportunities = pgTable(
     personId: integer("person_id")
       .notNull()
       .references(() => people.id),
+    leadId: integer("lead_id").references(() => leads.id),
+    personProductId: integer("person_product_id").references(
+      () => personProducts.id
+    ),
+    crossSellSuggestionId: integer("cross_sell_suggestion_id"),
     productTypeId: integer("product_type_id") // CORRIGIDO: FK para product_types
       .notNull()
       .references(() => productTypes.id),
@@ -216,12 +354,27 @@ export const opportunities = pgTable(
     stageId: integer("stage_id")
       .notNull()
       .references(() => pipelineStages.id),
-    ownerId: integer("owner_id").references(() => users.id),
+    ownerId: integer("owner_id")
+      .notNull()
+      .references(() => users.id),
+    createdById: integer("created_by_id").references(() => users.id),
+    type: opportunityTypeEnum("type").notNull(),
     estimatedValue: numeric("estimated_value", { precision: 12, scale: 2 }),
     probability: integer("probability").notNull().default(50),
-    origin: text("origin"),
+    source: contactSourceEnum("source").notNull(),
+    channel: entryChannelEnum("channel").notNull(),
+    campaign: text("campaign"),
+    referredByPersonId: integer("referred_by_person_id").references(
+      () => people.id
+    ),
+    sourceDetail: text("source_detail"),
+    renewalKey: text("renewal_key"),
+    recoveryKey: text("recovery_key"),
     status: opportunityStatusEnum("status").notNull().default("aberta"),
-    lostReason: text("lost_reason"),
+    closeOutcome: opportunityCloseOutcomeEnum("close_outcome"),
+    lossReason: opportunityLossReasonEnum("loss_reason"),
+    closeNotes: text("close_notes"),
+    nextExpirationDate: date("next_expiration_date"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastMovementAt: timestamp("last_movement_at", { withTimezone: true }).notNull().defaultNow(),
@@ -234,6 +387,106 @@ export const opportunities = pgTable(
     index("idx_opp_pipeline").on(table.pipelineId),
     index("idx_opp_owner").on(table.ownerId),
     index("idx_opp_last_movement").on(table.lastMovementAt),
+    uniqueIndex("idx_opp_lead_unique").on(table.leadId),
+    uniqueIndex("idx_opp_renewal_key_unique").on(table.renewalKey),
+    uniqueIndex("idx_opp_recovery_key_unique").on(table.recoveryKey),
+    uniqueIndex("idx_opp_cross_sell_unique").on(table.crossSellSuggestionId),
+    check(
+      "opportunities_origin_consistency",
+      sql`(${table.leadId} IS NULL OR ${table.type} = 'novo_negocio')
+        AND (${table.type} <> 'renovacao' OR (${table.personProductId} IS NOT NULL AND ${table.renewalKey} IS NOT NULL))
+        AND (${table.type} = 'renovacao' OR (${table.personProductId} IS NULL AND ${table.renewalKey} IS NULL))
+        AND (${table.type} <> 'recuperacao' OR ${table.recoveryKey} IS NOT NULL)
+        AND (${table.type} = 'recuperacao' OR ${table.recoveryKey} IS NULL)`
+    ),
+    check(
+      "opportunities_no_self_referral",
+      sql`${table.referredByPersonId} IS NULL OR ${table.referredByPersonId} <> ${table.personId}`
+    ),
+    check(
+      "opportunities_close_details_consistency",
+      sql`(
+          ${table.status} = 'perdida'
+          AND ${table.closeOutcome} IS NOT NULL
+          AND ${table.lossReason} IS NOT NULL
+          AND nullif(btrim(${table.closeNotes}), '') IS NOT NULL
+        ) OR (
+          ${table.status} = 'cancelada'
+          AND ${table.closeOutcome} = 'cancelamento_erro_duplicidade'
+          AND ${table.lossReason} IS NULL
+          AND nullif(btrim(${table.closeNotes}), '') IS NOT NULL
+        ) OR ${table.status} IN ('aberta', 'ganha')`
+    ),
+    check(
+      "opportunities_external_expiration_required",
+      sql`${table.closeOutcome} NOT IN (
+          'renovou_outra_corretora',
+          'renovou_direto_banco_seguradora',
+          'contratou_protecao_veicular'
+        ) OR ${table.nextExpirationDate} IS NOT NULL`
+    ),
+  ]
+);
+
+// ─── SCHEDULED COMMERCIAL RETURNS ───────────────────────────────────────────
+
+export const scheduledCommercialReturns = pgTable(
+  "scheduled_commercial_returns",
+  {
+    id: serial("id").primaryKey(),
+    personId: integer("person_id")
+      .notNull()
+      .references(() => people.id),
+    sourceOpportunityId: integer("source_opportunity_id")
+      .notNull()
+      .references(() => opportunities.id),
+    createdOpportunityId: integer("created_opportunity_id").references(
+      () => opportunities.id
+    ),
+    productTypeId: integer("product_type_id")
+      .notNull()
+      .references(() => productTypes.id),
+    ownerId: integer("owner_id")
+      .notNull()
+      .references(() => users.id),
+    closeOutcome: opportunityCloseOutcomeEnum("close_outcome").notNull(),
+    nextExpirationDate: date("next_expiration_date").notNull(),
+    scheduledFor: date("scheduled_for").notNull(),
+    notes: text("notes").notNull(),
+    status: scheduledCommercialReturnStatusEnum("status")
+      .notNull()
+      .default("pendente"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("idx_commercial_return_source_unique").on(
+      table.sourceOpportunityId
+    ),
+    uniqueIndex("idx_commercial_return_created_opportunity_unique").on(
+      table.createdOpportunityId
+    ),
+    index("idx_commercial_return_due").on(table.status, table.scheduledFor),
+    index("idx_commercial_return_person").on(table.personId),
+    check(
+      "scheduled_return_external_outcome",
+      sql`${table.closeOutcome} IN (
+        'renovou_outra_corretora',
+        'renovou_direto_banco_seguradora',
+        'contratou_protecao_veicular'
+      )`
+    ),
+    check(
+      "scheduled_return_45_days_before",
+      sql`${table.scheduledFor} = ${table.nextExpirationDate} - 45`
+    ),
+    check(
+      "scheduled_return_notes_required",
+      sql`nullif(btrim(${table.notes}), '') IS NOT NULL`
+    ),
   ]
 );
 
@@ -272,6 +525,7 @@ export const activities = pgTable(
     personId: integer("person_id")
       .notNull()
       .references(() => people.id),
+    leadId: integer("lead_id").references(() => leads.id),
     opportunityId: integer("opportunity_id").references(() => opportunities.id),
     ownerId: integer("owner_id").references(() => users.id),
     type: activityTypeEnum("type").notNull(),
@@ -280,7 +534,12 @@ export const activities = pgTable(
   },
   (table) => [
     index("idx_act_person").on(table.personId),
+    index("idx_act_lead").on(table.leadId),
     index("idx_act_opportunity").on(table.opportunityId),
+    check(
+      "activities_single_process",
+      sql`NOT (${table.leadId} IS NOT NULL AND ${table.opportunityId} IS NOT NULL)`
+    ),
   ]
 );
 
@@ -293,6 +552,7 @@ export const timelineEvents = pgTable(
     personId: integer("person_id")
       .notNull()
       .references(() => people.id),
+    leadId: integer("lead_id").references(() => leads.id),
     opportunityId: integer("opportunity_id").references(() => opportunities.id),
     actorId: integer("actor_id").references(() => users.id),
     type: text("type").notNull(),
@@ -303,6 +563,7 @@ export const timelineEvents = pgTable(
   },
   (table) => [
     index("idx_timeline_person_created").on(table.personId, table.createdAt),
+    index("idx_timeline_lead").on(table.leadId),
     index("idx_timeline_opportunity").on(table.opportunityId),
   ]
 );

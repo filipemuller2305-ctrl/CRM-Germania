@@ -1,0 +1,19 @@
+{
+  "name": "@germania/scg-domain",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/domain-model.test.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "pg": "8.20.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "@types/pg": "8.18.0",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.3"
+  }
+}

@@ -33,8 +33,9 @@ export async function createPerson(
       whatsapp: formData.get("whatsapp") as string || null,
       email: formData.get("email") as string || null,
       document: formData.get("document") as string || null,
-      origin: formData.get("origin") as any || null,
-      ownerId: formData.get("ownerId") ? Number(formData.get("ownerId")) : null,
+      relationshipOwnerId: formData.get("relationshipOwnerId")
+        ? Number(formData.get("relationshipOwnerId"))
+        : null,
       notes: formData.get("notes") as string || null,
     };
 
@@ -90,10 +91,9 @@ const updatePersonSchema = z.object({
   whatsapp: z.string().optional().nullable(),
   email: z.string().optional().nullable(),
   document: z.string().optional().nullable(),
-  origin: z.string().optional().nullable(),
-  ownerId: z.number().int().positive().optional().nullable(),
+  relationshipOwnerId: z.number().int().positive().optional().nullable(),
   notes: z.string().optional().nullable(),
-  status: z.enum(["lead", "ativo", "cliente", "inativo"]).optional(),
+  status: z.enum(["ativa", "inativa"]).optional(),
 });
 
 export async function updatePerson(
@@ -115,17 +115,15 @@ export async function updatePerson(
       whatsapp: input.whatsapp,
       email: input.email,
       document: input.document,
-      origin: input.origin as any,
-      ownerId: input.ownerId,
+      relationshipOwnerId: input.relationshipOwnerId,
       notes: input.notes,
     });
 
     // Atualiza status se fornecido
     if (input.status && input.status !== person.status) {
       switch (input.status) {
-        case "ativo": person.activate(); break;
-        case "inativo": person.deactivate(); break;
-        case "cliente": person.markAsClient(); break;
+        case "ativa": person.reactivate(); break;
+        case "inativa": person.deactivate(); break;
       }
     }
 
@@ -156,7 +154,7 @@ export async function updatePerson(
 export async function listPeople(params?: {
   status?: string;
   search?: string;
-  ownerId?: number;
+  relationshipOwnerId?: number;
   cursor?: number;
   limit?: number;
 }): Promise<ActionResponse<{
@@ -166,7 +164,6 @@ export async function listPeople(params?: {
     status: string;
     email: string | null;
     phone: string | null;
-    origin: string | null;
     createdAt: Date;
   }>;
   total: number;
@@ -174,12 +171,13 @@ export async function listPeople(params?: {
   hasMore: boolean;
 }>> {
   try {
+    await requireAuth();
     const repos = getRepositories();
 
     const result = await repos.person.list({
       status: params?.status,
       search: params?.search,
-      ownerId: params?.ownerId,
+      relationshipOwnerId: params?.relationshipOwnerId,
       pagination: {
         cursor: params?.cursor,
         limit: params?.limit ?? 20,
@@ -193,7 +191,6 @@ export async function listPeople(params?: {
         status: p.status,
         email: p.email,
         phone: p.phone?.formatted ?? null,
-        origin: p.origin,
         createdAt: p.createdAt,
       })),
       total: result.total,
@@ -209,6 +206,7 @@ export async function listPeople(params?: {
 
 export async function getPersonWorkspace(personId: number): Promise<ActionResponse<any>> {
   try {
+    await requireAuth();
     const repos = getRepositories();
 
     const person = await repos.person.findById(personId);
@@ -219,6 +217,7 @@ export async function getPersonWorkspace(personId: number): Promise<ActionRespon
     // Carrega todos os dados do workspace em paralelo
     const [
       opportunities,
+      leads,
       products,
       timeline,
       activities,
@@ -226,6 +225,7 @@ export async function getPersonWorkspace(personId: number): Promise<ActionRespon
       csStages,
     ] = await Promise.all([
       repos.opportunity.findByPersonId(personId),
+      repos.lead.findOpenByPersonId(personId),
       repos.personProduct.findByPersonId(personId),
       repos.timeline.findByPersonId(personId, { limit: 50 }),
       repos.activity.findByPersonId(personId, { limit: 20 }),
@@ -242,9 +242,8 @@ export async function getPersonWorkspace(personId: number): Promise<ActionRespon
         whatsapp: person.whatsapp?.formatted ?? null,
         email: person.email,
         document: person.document?.formatted ?? null,
-        origin: person.origin,
         status: person.status,
-        ownerId: person.ownerId,
+        relationshipOwnerId: person.relationshipOwnerId,
         notes: person.notes,
         createdAt: person.createdAt,
       },
@@ -257,6 +256,16 @@ export async function getPersonWorkspace(personId: number): Promise<ActionRespon
         stageId: o.stageId,
         createdAt: o.createdAt,
         lastMovementAt: o.lastMovementAt,
+      })),
+      leads: leads.map((lead) => ({
+        id: lead.id,
+        status: lead.status,
+        source: lead.source,
+        channel: lead.channel,
+        campaign: lead.campaign,
+        productTypeId: lead.productTypeId,
+        ownerId: lead.ownerId,
+        createdAt: lead.createdAt,
       })),
       products: products.map((p) => ({
         id: p.id,

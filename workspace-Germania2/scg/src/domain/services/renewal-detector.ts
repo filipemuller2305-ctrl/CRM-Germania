@@ -1,15 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Domain Service: RenewalDetector
-// Detecta produtos na janela de renovação e gera oportunidades automáticas
-// INV-09: renewal_date ≤ 45 dias → criar oportunidade de renovação
+// Detecta ciclos de renovação de forma idempotente.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { ProductStatus } from "../types";
 
-/** Janela de renovação em dias */
 export const RENEWAL_WINDOW_DAYS = 45;
+export const RENEWAL_OVERDUE_LOOKBACK_DAYS = 90;
 
-/** Dados mínimos de um produto para avaliação de renovação */
 export interface RenewableProduct {
   personProductId: number;
   personId: number;
@@ -21,14 +19,13 @@ export interface RenewableProduct {
   ownerId: number | null;
 }
 
-/** Dados mínimos de uma oportunidade aberta */
-export interface OpenOpportunityRef {
-  personId: number;
-  productTypeId: number;
+/** Qualquer oportunidade de renovação já criada, aberta ou fechada. */
+export interface ExistingRenewalRef {
+  renewalKey: string;
 }
 
-/** Resultado da detecção */
 export interface RenewalCandidate {
+  renewalKey: string;
   personProductId: number;
   personId: number;
   personName: string;
@@ -41,83 +38,106 @@ export interface RenewalCandidate {
 
 export class RenewalDetector {
   /**
-   * Dada uma lista de produtos renováveis e oportunidades abertas,
-   * retorna quais produtos precisam de uma nova oportunidade de renovação.
-   *
-   * Critérios:
-   * 1. Produto está ATIVO
-   * 2. renewal_date está entre hoje e hoje + RENEWAL_WINDOW_DAYS
-   * 3. NÃO existe oportunidade aberta para o mesmo produto + pessoa
+   * A chave personProductId:data-do-ciclo impede duplicação mesmo se uma
+   * oportunidade anterior já tiver sido perdida ou ganha.
    */
   detect(
     products: RenewableProduct[],
-    openOpportunities: OpenOpportunityRef[]
+    existingRenewals: ExistingRenewalRef[],
+    referenceDate: Date = new Date()
   ): RenewalCandidate[] {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    const today = RenewalDetector.atStartOfDay(referenceDate);
     const windowEnd = new Date(today);
     windowEnd.setDate(windowEnd.getDate() + RENEWAL_WINDOW_DAYS);
-
-    // Index de oportunidades abertas por person+product
-    const openOppSet = new Set(
-      openOpportunities.map((o) => `${o.personId}:${o.productTypeId}`)
+    const lookbackStart = new Date(today);
+    lookbackStart.setDate(
+      lookbackStart.getDate() - RENEWAL_OVERDUE_LOOKBACK_DAYS
     );
 
+    const existingKeys = new Set(
+      existingRenewals.map((opportunity) => opportunity.renewalKey)
+    );
     const candidates: RenewalCandidate[] = [];
 
     for (const product of products) {
-      // 1. Deve estar ativo
-      if (product.status !== ProductStatus.ATIVA) continue;
+      if (product.status !== ProductStatus.ATIVA || !product.renewalDate) {
+        continue;
+      }
 
-      // 2. Deve ter data de renovação
-      if (!product.renewalDate) continue;
+      const renewalDate = RenewalDetector.atStartOfDay(product.renewalDate);
+      if (renewalDate < lookbackStart || renewalDate > windowEnd) continue;
 
-      const renewal = new Date(product.renewalDate);
-      renewal.setHours(0, 0, 0, 0);
-
-      // 3. Deve estar na janela (hoje ≤ renewal ≤ hoje + 45 dias)
-      if (renewal < today || renewal > windowEnd) continue;
-
-      // 4. Não deve ter oportunidade aberta para este produto/pessoa
-      const key = `${product.personId}:${product.productTypeId}`;
-      if (openOppSet.has(key)) continue;
-
-      const daysUntil = Math.ceil(
-        (renewal.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      const renewalKey = RenewalDetector.buildRenewalKey(
+        product.personProductId,
+        renewalDate
       );
+      if (existingKeys.has(renewalKey)) continue;
 
       candidates.push({
+        renewalKey,
         personProductId: product.personProductId,
         personId: product.personId,
         personName: product.personName,
         productTypeId: product.productTypeId,
         productTypeName: product.productTypeName,
-        renewalDate: renewal,
-        daysUntilRenewal: daysUntil,
+        renewalDate,
+        daysUntilRenewal: Math.ceil(
+          (renewalDate.getTime() - today.getTime()) / 86_400_000
+        ),
         ownerId: product.ownerId,
       });
     }
 
-    // Ordena por urgência (menos dias primeiro)
-    return candidates.sort((a, b) => a.daysUntilRenewal - b.daysUntilRenewal);
+    return candidates.sort(
+      (a, b) => a.daysUntilRenewal - b.daysUntilRenewal
+    );
   }
 
-  /**
-   * Calcula a data ideal para o próximo passo da oportunidade de renovação.
-   * Regra: renewal_date - 30 dias (para ter tempo de cotar e negociar).
-   */
-  static nextStepDueDate(renewalDate: Date): Date {
-    const due = new Date(renewalDate);
-    due.setDate(due.getDate() - 30);
-
-    // Se a data já passou (renovação em menos de 30 dias), due = hoje + 1
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (due < today) {
-      due.setDate(today.getDate() + 1);
+  static buildRenewalKey(
+    personProductId: number,
+    renewalDate: Date
+  ): string {
+    if (!Number.isInteger(personProductId) || personProductId <= 0) {
+      throw new RenewalValidationError(
+        "Produto contratado deve ser um ID válido"
+      );
     }
+    const normalized = RenewalDetector.atStartOfDay(renewalDate);
+    const year = normalized.getFullYear();
+    const month = String(normalized.getMonth() + 1).padStart(2, "0");
+    const day = String(normalized.getDate()).padStart(2, "0");
+    return `${personProductId}:${year}-${month}-${day}`;
+  }
 
-    return due;
+  static nextStepDueDate(
+    renewalDate: Date,
+    referenceDate: Date = new Date()
+  ): Date {
+    const dueDate = RenewalDetector.atStartOfDay(renewalDate);
+    dueDate.setDate(dueDate.getDate() - 30);
+
+    const today = RenewalDetector.atStartOfDay(referenceDate);
+    if (dueDate <= today) {
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return tomorrow;
+    }
+    return dueDate;
+  }
+
+  private static atStartOfDay(value: Date): Date {
+    const result = new Date(value);
+    if (Number.isNaN(result.getTime())) {
+      throw new RenewalValidationError("Data de renovação inválida");
+    }
+    result.setHours(0, 0, 0, 0);
+    return result;
+  }
+}
+
+export class RenewalValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RenewalValidationError";
   }
 }

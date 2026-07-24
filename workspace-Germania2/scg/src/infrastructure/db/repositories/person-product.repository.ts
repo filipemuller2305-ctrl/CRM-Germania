@@ -44,11 +44,17 @@ export class DrizzlePersonProductRepository implements PersonProductRepository {
   }
 
   /**
-   * Busca produtos ativos com renewal_date na janela [hoje, hoje + windowDays].
+   * Inclui ciclos vencidos recentemente para recuperar uma execução de cron
+   * perdida sem abandonar a idempotência por renewalKey.
    * Usado pelo RenewalCheckerCron.
    */
-  async findRenewable(windowDays: number): Promise<PersonProduct[]> {
-    const today = new Date().toISOString().split("T")[0];
+  async findRenewable(
+    windowDays: number,
+    overdueLookbackDays = 90
+  ): Promise<PersonProduct[]> {
+    const windowStart = new Date();
+    windowStart.setDate(windowStart.getDate() - overdueLookbackDays);
+    const startStr = windowStart.toISOString().split("T")[0];
 
     const windowEnd = new Date();
     windowEnd.setDate(windowEnd.getDate() + windowDays);
@@ -60,7 +66,7 @@ export class DrizzlePersonProductRepository implements PersonProductRepository {
       .where(
         and(
           eq(personProducts.status, "ativa"),
-          gte(personProducts.renewalDate, today),
+          gte(personProducts.renewalDate, startStr),
           lte(personProducts.renewalDate, endStr)
         )
       );

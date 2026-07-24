@@ -32,8 +32,6 @@ export function registerEventHandlers(deps: HandlerDependencies): void {
   // ─── Opportunity Won → Customer Success ──────────────────────────────────
   const onOpportunityWon = new OnOpportunityWonHandler(
     deps.customerSuccessRepo,
-    deps.personRepo,
-    deps.personProductRepo,
     deps.timelineRepo
   );
   eventBus.on("opportunity.won", (event) => onOpportunityWon.handle(event));

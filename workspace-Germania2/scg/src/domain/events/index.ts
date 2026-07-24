@@ -26,7 +26,6 @@ export class PersonCreatedEvent extends BaseEvent {
   constructor(
     public readonly personId: number,
     public readonly personName: string,
-    public readonly origin: string | null,
     actorId: number | null
   ) {
     super("person.created", actorId);
@@ -89,20 +88,11 @@ export class OpportunityLostEvent extends BaseEvent {
   constructor(
     public readonly opportunityId: number,
     public readonly personId: number,
-    public readonly lostReason: string,
+    public readonly closeOutcome: string,
+    public readonly lossReason: string,
     actorId: number | null
   ) {
     super("opportunity.lost", actorId);
-  }
-}
-
-export class OpportunityReopenedEvent extends BaseEvent {
-  constructor(
-    public readonly opportunityId: number,
-    public readonly personId: number,
-    actorId: number | null
-  ) {
-    super("opportunity.reopened", actorId);
   }
 }
 
@@ -269,7 +259,6 @@ export interface EventMap {
   "opportunity.stage_changed": StageChangedEvent;
   "opportunity.won": OpportunityWonEvent;
   "opportunity.lost": OpportunityLostEvent;
-  "opportunity.reopened": OpportunityReopenedEvent;
   "next_step.created": NextStepCreatedEvent;
   "next_step.completed": NextStepCompletedEvent;
   "next_step.overdue": NextStepOverdueEvent;

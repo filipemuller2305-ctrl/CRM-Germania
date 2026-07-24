@@ -5,11 +5,13 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { Person, PersonProps, CreatePersonInput } from "@/domain/entities/person.entity";
+import type { Lead } from "@/domain/entities/lead.entity";
 import type { Opportunity, OpportunityProps } from "@/domain/entities/opportunity.entity";
 import type { NextStep, NextStepProps } from "@/domain/entities/next-step.entity";
 import type { Activity } from "@/domain/entities/activity.entity";
 import type { PersonProduct } from "@/domain/entities/person-product.entity";
 import type { CustomerSuccessStage } from "@/domain/entities/customer-success-stage.entity";
+import type { ScheduledCommercialReturn } from "@/domain/entities/scheduled-commercial-return.entity";
 import type { OpportunityStatus, NextStepStatus, ProductStatus } from "@/domain/types";
 
 // ─── PAGINATION ──────────────────────────────────────────────────────────────
@@ -35,7 +37,7 @@ export interface PersonRepository {
   findByErpCustomerId(erpId: string): Promise<Person | null>;
   list(params: {
     status?: string;
-    ownerId?: number;
+    relationshipOwnerId?: number;
     search?: string;
     pagination?: PaginationParams;
   }): Promise<PaginatedResult<Person>>;
@@ -43,17 +45,47 @@ export interface PersonRepository {
   update(person: Person): Promise<Person>;
 }
 
+// ─── LEAD REPOSITORY ────────────────────────────────────────────────────────
+
+export interface LeadRepository {
+  findById(id: number): Promise<Lead | null>;
+  findByOpportunityId(opportunityId: number): Promise<Lead | null>;
+  findOpenByPersonId(personId: number): Promise<Lead[]>;
+  create(lead: Lead): Promise<Lead>;
+  update(lead: Lead): Promise<Lead>;
+}
+
 // ─── OPPORTUNITY REPOSITORY ──────────────────────────────────────────────────
 
 export interface OpportunityRepository {
   findById(id: number): Promise<Opportunity | null>;
   findByPersonId(personId: number): Promise<Opportunity[]>;
+  findByLeadId(leadId: number): Promise<Opportunity | null>;
+  findByRenewalKey(renewalKey: string): Promise<Opportunity | null>;
+  findByRecoveryKey(recoveryKey: string): Promise<Opportunity | null>;
+  listRenewals(): Promise<Opportunity[]>;
   findOpenByPersonAndProduct(personId: number, productTypeId: number): Promise<Opportunity | null>;
   listByPipeline(pipelineId: number): Promise<Opportunity[]>;
   listOpen(params?: PaginationParams): Promise<PaginatedResult<Opportunity>>;
   create(opportunity: Opportunity): Promise<Opportunity>;
   update(opportunity: Opportunity): Promise<Opportunity>;
   countOpenByOwner(ownerId: number): Promise<number>;
+}
+
+// ─── SCHEDULED COMMERCIAL RETURN REPOSITORY ─────────────────────────────────
+
+export interface ScheduledCommercialReturnRepository {
+  findById(id: number): Promise<ScheduledCommercialReturn | null>;
+  findBySourceOpportunityId(
+    sourceOpportunityId: number
+  ): Promise<ScheduledCommercialReturn | null>;
+  findDue(referenceDate?: Date): Promise<ScheduledCommercialReturn[]>;
+  create(
+    commercialReturn: ScheduledCommercialReturn
+  ): Promise<ScheduledCommercialReturn>;
+  update(
+    commercialReturn: ScheduledCommercialReturn
+  ): Promise<ScheduledCommercialReturn>;
 }
 
 // ─── NEXT STEP REPOSITORY ────────────────────────────────────────────────────
@@ -82,7 +114,10 @@ export interface PersonProductRepository {
   findById(id: number): Promise<PersonProduct | null>;
   findByPersonId(personId: number): Promise<PersonProduct[]>;
   findActiveByPersonId(personId: number): Promise<PersonProduct[]>;
-  findRenewable(windowDays: number): Promise<PersonProduct[]>;
+  findRenewable(
+    windowDays: number,
+    overdueLookbackDays?: number
+  ): Promise<PersonProduct[]>;
   create(product: PersonProduct): Promise<PersonProduct>;
   update(product: PersonProduct): Promise<PersonProduct>;
 }
@@ -102,12 +137,31 @@ export interface CustomerSuccessRepository {
 
 export interface TimelineEventInput {
   personId: number;
+  leadId?: number | null;
   opportunityId?: number | null;
   actorId?: number | null;
   type: string;
   title: string;
   description?: string | null;
   metadata?: Record<string, unknown> | null;
+}
+
+// ─── TRANSACTION ────────────────────────────────────────────────────────────
+
+export interface TransactionRepositories {
+  person: PersonRepository;
+  lead: LeadRepository;
+  opportunity: OpportunityRepository;
+  nextStep: NextStepRepository;
+  activity: ActivityRepository;
+  scheduledCommercialReturn: ScheduledCommercialReturnRepository;
+  timeline: TimelineRepository;
+}
+
+export interface TransactionManager {
+  run<T>(
+    work: (repositories: TransactionRepositories) => Promise<T>
+  ): Promise<T>;
 }
 
 export interface TimelineRepository {

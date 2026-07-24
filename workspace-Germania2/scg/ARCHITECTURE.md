@@ -3,7 +3,7 @@
 
 ---
 
-## Estrutura de Arquivos (44 arquivos, ~5.800 linhas)
+## Estrutura de Arquivos
 
 ```
 scg/src/
@@ -12,7 +12,9 @@ scg/src/
 │   ├── types.ts                     ← Enums, constantes, tipos compartilhados
 │   ├── entities/
 │   │   ├── person.entity.ts         ← Pessoa (entidade central)
+│   │   ├── lead.entity.ts           ← Entrada e qualificação
 │   │   ├── opportunity.entity.ts    ← Oportunidade comercial
+│   │   ├── scheduled-commercial-return.entity.ts ← Retorno de apólice externa
 │   │   ├── next-step.entity.ts      ← Próximo Passo (INV-02)
 │   │   ├── activity.entity.ts       ← Atividade do consultor
 │   │   ├── person-product.entity.ts ← Produto/Seguro da pessoa
@@ -34,6 +36,9 @@ scg/src/
 │   ├── use-cases-factory.ts         ← Factory para Server Actions
 │   ├── person/
 │   │   └── create-person.usecase.ts
+│   ├── lead/
+│   │   ├── create-lead.usecase.ts
+│   │   └── convert-lead.usecase.ts
 │   ├── opportunity/
 │   │   ├── create-opportunity.usecase.ts
 │   │   └── move-stage.usecase.ts
@@ -48,9 +53,11 @@ scg/src/
     │   ├── index.ts                 ← Conexão Drizzle + Pool
     │   ├── schema.ts                ← Schema PostgreSQL completo (ENUMs, índices)
     │   ├── mappers.ts               ← Conversão DB rows ↔ Domain entities
+    │   ├── transaction-manager.ts   ← Unidade de trabalho atômica
     │   └── repositories/
     │       ├── index.ts             ← Factory + barrel (getRepositories())
     │       ├── person.repository.ts
+    │       ├── lead.repository.ts
     │       ├── opportunity.repository.ts
     │       ├── next-step.repository.ts
     │       ├── activity.repository.ts
@@ -78,14 +85,15 @@ scg/src/
 | INV | Regra | Onde |
 |-----|-------|------|
 | 01 | CPF/CNPJ único | `CpfCnpj` VO + `CreatePersonUseCase` |
-| 02 | Oportunidade aberta exige NextStep | `OpportunityInvariants` + `CreateOpportunityUseCase` + `CompleteNextStepUseCase` |
+| 02 | Oportunidade aberta exige NextStep | `ConvertLeadUseCase` + `CreateOpportunityUseCase` + `CompleteNextStepUseCase` |
 | 03 | Timeline imutável | `TimelineRepository` (INSERT only) + REVOKE no DDL |
 | 04 | Etapa pertence ao pipeline | `OpportunityInvariants.assertStageBelongsToPipeline` |
-| 05 | Perdida exige motivo | `Opportunity.closeAsLost()` + `MoveStageUseCase` |
+| 05 | Perdida exige motivo | `Opportunity.moveToStage()` + `MoveStageUseCase` |
 | 06 | Ganha → CS automático | `OnOpportunityWonHandler` |
 | 07 | Atividade gera NextStep | `RegisterActivityUseCase` (flag generateNextStep) |
 | 08 | Produto → Cross Sell | `OnProductActivatedHandler` + `CrossSellEngine` |
 | 09 | Renovação → Oportunidade | `RenewalCheckerCron` + `RenewalDetector` |
+| 10 | Renovação perdida → recuperação futura | `ScheduledCommercialReturn` + `CommercialReturnCheckerCron` |
 | 10 | Movimentação → Timeline | `MoveStageUseCase` + todos os use cases |
 
 ---
@@ -144,7 +152,6 @@ export async function moveOpportunityStage(input: MoveStageInput) {
   const repos = getRepositories();
   const useCase = new MoveStageUseCase(
     repos.opportunity,
-    repos.nextStep,
     repos.pipeline,
     repos.timeline
   );
@@ -161,7 +168,7 @@ MoveStage(kind=won)
   → OpportunityWonEvent
     → OnOpportunityWonHandler
       → Cria 6 CS Stages
-      → Pessoa vira "cliente"
+      → Cliente continua sendo condição derivada de produto ativo
       → Timeline
 
 ProductActivated

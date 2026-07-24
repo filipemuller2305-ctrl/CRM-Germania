@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { eq, and, or, ilike, desc, lt, sql } from "drizzle-orm";
-import { db } from "../index";
+import { db, type Database } from "../index";
 import { people } from "../schema";
 import { personToDomain, personToDb } from "../mappers";
 import { Person } from "@/domain/entities/person.entity";
@@ -12,8 +12,10 @@ import type { PersonRepository, PaginatedResult, PaginationParams } from "@/appl
 const DEFAULT_LIMIT = 20;
 
 export class DrizzlePersonRepository implements PersonRepository {
+  constructor(private readonly database: Database = db) {}
+
   async findById(id: number): Promise<Person | null> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(people)
       .where(eq(people.id, id))
@@ -23,7 +25,7 @@ export class DrizzlePersonRepository implements PersonRepository {
   }
 
   async findByDocument(document: string): Promise<Person | null> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(people)
       .where(eq(people.document, document))
@@ -33,7 +35,7 @@ export class DrizzlePersonRepository implements PersonRepository {
   }
 
   async findByEmail(email: string): Promise<Person | null> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(people)
       .where(eq(people.email, email.toLowerCase()))
@@ -43,7 +45,7 @@ export class DrizzlePersonRepository implements PersonRepository {
   }
 
   async findByErpCustomerId(erpId: string): Promise<Person | null> {
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(people)
       .where(eq(people.erpCustomerId, erpId))
@@ -54,7 +56,7 @@ export class DrizzlePersonRepository implements PersonRepository {
 
   async list(params: {
     status?: string;
-    ownerId?: number;
+    relationshipOwnerId?: number;
     search?: string;
     pagination?: PaginationParams;
   }): Promise<PaginatedResult<Person>> {
@@ -68,8 +70,10 @@ export class DrizzlePersonRepository implements PersonRepository {
       conditions.push(eq(people.status, params.status as any));
     }
 
-    if (params.ownerId) {
-      conditions.push(eq(people.ownerId, params.ownerId));
+    if (params.relationshipOwnerId) {
+      conditions.push(
+        eq(people.relationshipOwnerId, params.relationshipOwnerId)
+      );
     }
 
     if (params.search && params.search.trim().length > 0) {
@@ -92,7 +96,7 @@ export class DrizzlePersonRepository implements PersonRepository {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     // Busca dados + 1 extra para saber se tem mais
-    const rows = await db
+    const rows = await this.database
       .select()
       .from(people)
       .where(whereClause)
@@ -104,7 +108,7 @@ export class DrizzlePersonRepository implements PersonRepository {
     const lastItem = data[data.length - 1];
 
     // Total count (para exibição)
-    const [countResult] = await db
+    const [countResult] = await this.database
       .select({ count: sql<number>`count(*)::int` })
       .from(people)
       .where(
@@ -124,7 +128,7 @@ export class DrizzlePersonRepository implements PersonRepository {
   async create(person: Person): Promise<Person> {
     const data = personToDb(person);
 
-    const [row] = await db
+    const [row] = await this.database
       .insert(people)
       .values({
         name: data.name!,
@@ -133,9 +137,8 @@ export class DrizzlePersonRepository implements PersonRepository {
         whatsapp: data.whatsapp,
         email: data.email,
         document: data.document,
-        origin: data.origin,
         status: data.status as any,
-        ownerId: data.ownerId,
+        relationshipOwnerId: data.relationshipOwnerId,
         notes: data.notes,
         erpCustomerId: data.erpCustomerId,
       })
@@ -147,7 +150,7 @@ export class DrizzlePersonRepository implements PersonRepository {
   async update(person: Person): Promise<Person> {
     const data = personToDb(person);
 
-    const [row] = await db
+    const [row] = await this.database
       .update(people)
       .set({
         name: data.name,
@@ -156,9 +159,8 @@ export class DrizzlePersonRepository implements PersonRepository {
         whatsapp: data.whatsapp,
         email: data.email,
         document: data.document,
-        origin: data.origin,
         status: data.status as any,
-        ownerId: data.ownerId,
+        relationshipOwnerId: data.relationshipOwnerId,
         notes: data.notes,
         erpCustomerId: data.erpCustomerId,
         updatedAt: new Date(),
