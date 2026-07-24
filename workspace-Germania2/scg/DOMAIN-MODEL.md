@@ -113,6 +113,40 @@ Oportunidade fechada não é reaberta no fluxo normal. Uma nova tentativa cria
 outra Oportunidade e preserva o histórico anterior. Correções administrativas
 devem possuir permissão específica e trilha de auditoria.
 
+## Funil único e estados de saída
+
+Leads ficam na caixa de qualificação até existir demanda concreta. Depois da
+conversão, novos negócios, cross-selling, demandas diretas, renovações e
+recuperações trabalham no mesmo funil de Oportunidades.
+
+O Kanban exibe somente Oportunidades abertas. Ganhas, encerradas sem sucesso e
+canceladas saem da operação e continuam disponíveis no histórico e nos
+dashboards. Cancelamento por erro ou duplicidade não é contabilizado como perda.
+
+O encerramento sem sucesso exige três classificações:
+
+1. **Desfecho:** o que aconteceu com a contratação.
+2. **Motivo:** por que a Germânia não concluiu.
+3. **Observação:** contexto obrigatório escrito pelo comercial.
+
+Quando o desfecho informa contratação fora da Germânia, o próximo vencimento
+também é obrigatório.
+
+## Retorno comercial programado
+
+Uma renovação não fechada nunca é reaberta. Se o cliente renovar com outra
+corretora, banco, seguradora ou proteção veicular:
+
+1. a Oportunidade atual é encerrada e preserva seu resultado;
+2. o próximo vencimento informado gera um retorno comercial pendente;
+3. o retorno fica fora do Kanban até 45 dias antes do vencimento;
+4. na data programada nasce uma nova Oportunidade do tipo `recuperacao`;
+5. a nova Oportunidade nasce com responsável e primeiro próximo passo;
+6. `recoveryKey` impede que a rotina crie a mesma recuperação duas vezes.
+
+O retorno comercial não cria `PersonProduct`, pois a apólice externa não é um
+produto ativo da Germânia.
+
 ## Renovação
 
 `renewalKey` segue o formato:
@@ -124,6 +158,9 @@ personProductId:AAAA-MM-DD
 O detector verifica oportunidades de renovação abertas e fechadas por essa
 chave. Assim, uma renovação perdida não reaparece diariamente. A janela padrão
 é 45 dias antes e 90 dias de recuperação para rotinas que ficaram sem executar.
+
+Essa rotina cobre produtos ativos da carteira. O retorno de uma apólice
+contratada fora é tratado separadamente por `ScheduledCommercialReturn`.
 
 ## Próximo passo de implementação
 

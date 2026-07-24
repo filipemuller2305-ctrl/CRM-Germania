@@ -10,6 +10,10 @@ import { NextStep, type NextStepProps } from "@/domain/entities/next-step.entity
 import { Activity, type ActivityProps } from "@/domain/entities/activity.entity";
 import { PersonProduct, type PersonProductProps } from "@/domain/entities/person-product.entity";
 import { CustomerSuccessStage, type CustomerSuccessStageProps } from "@/domain/entities/customer-success-stage.entity";
+import {
+  ScheduledCommercialReturn,
+  type ScheduledCommercialReturnProps,
+} from "@/domain/entities/scheduled-commercial-return.entity";
 import { CpfCnpj } from "@/domain/value-objects/cpf-cnpj";
 import { Phone } from "@/domain/value-objects/phone";
 import { Money } from "@/domain/value-objects/money";
@@ -22,6 +26,9 @@ import type {
   LeadStatus,
   OpportunityType,
   OpportunityStatus,
+  OpportunityCloseOutcome,
+  OpportunityLossReason,
+  ScheduledCommercialReturnStatus,
   NextStepStatus,
   ActivityType,
   ProductStatus,
@@ -146,8 +153,12 @@ export function opportunityToDomain(row: OpportunityRow): Opportunity {
       sourceDetail: row.sourceDetail,
     },
     renewalKey: row.renewalKey,
+    recoveryKey: row.recoveryKey,
     status: row.status as OpportunityStatus,
-    lostReason: row.lostReason,
+    closeOutcome: row.closeOutcome as OpportunityCloseOutcome | null,
+    lossReason: row.lossReason as OpportunityLossReason | null,
+    closeNotes: row.closeNotes,
+    nextExpirationDate: parseDateOnly(row.nextExpirationDate),
     notes: row.notes,
     createdAt: row.createdAt,
     lastMovementAt: row.lastMovementAt,
@@ -175,11 +186,61 @@ export function opportunityToDb(opp: Opportunity): Partial<OpportunityRow> {
     referredByPersonId: opp.attribution.referredByPersonId,
     sourceDetail: opp.attribution.sourceDetail,
     renewalKey: opp.renewalKey,
+    recoveryKey: opp.recoveryKey,
     status: opp.status,
-    lostReason: opp.lostReason,
+    closeOutcome: opp.closeOutcome,
+    lossReason: opp.lossReason,
+    closeNotes: opp.closeNotes,
+    nextExpirationDate: toDateString(opp.nextExpirationDate),
     notes: opp.notes,
     lastMovementAt: opp.lastMovementAt,
     closedAt: opp.closedAt,
+  };
+}
+
+// ─── SCHEDULED COMMERCIAL RETURN ─────────────────────────────────────────────
+
+type ScheduledCommercialReturnRow =
+  typeof S.scheduledCommercialReturns.$inferSelect;
+
+export function scheduledCommercialReturnToDomain(
+  row: ScheduledCommercialReturnRow
+): ScheduledCommercialReturn {
+  return ScheduledCommercialReturn.reconstitute({
+    id: row.id,
+    personId: row.personId,
+    sourceOpportunityId: row.sourceOpportunityId,
+    createdOpportunityId: row.createdOpportunityId,
+    productTypeId: row.productTypeId,
+    ownerId: row.ownerId,
+    closeOutcome: row.closeOutcome as OpportunityCloseOutcome,
+    nextExpirationDate: parseDateOnly(row.nextExpirationDate)!,
+    scheduledFor: parseDateOnly(row.scheduledFor)!,
+    notes: row.notes,
+    status: row.status as ScheduledCommercialReturnStatus,
+    createdAt: row.createdAt,
+    processedAt: parseDate(row.processedAt),
+    cancelledAt: parseDate(row.cancelledAt),
+  } as ScheduledCommercialReturnProps);
+}
+
+export function scheduledCommercialReturnToDb(
+  commercialReturn: ScheduledCommercialReturn
+): typeof S.scheduledCommercialReturns.$inferInsert {
+  const data = commercialReturn.toPersistence();
+  return {
+    personId: data.personId,
+    sourceOpportunityId: data.sourceOpportunityId,
+    createdOpportunityId: data.createdOpportunityId,
+    productTypeId: data.productTypeId,
+    ownerId: data.ownerId,
+    closeOutcome: data.closeOutcome,
+    nextExpirationDate: toDateString(data.nextExpirationDate)!,
+    scheduledFor: toDateString(data.scheduledFor)!,
+    notes: data.notes,
+    status: data.status,
+    processedAt: data.processedAt,
+    cancelledAt: data.cancelledAt,
   };
 }
 

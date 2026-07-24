@@ -32,6 +32,16 @@ export type { PersonProductProps, CreatePersonProductInput } from "./entities/pe
 export { CustomerSuccessStage, CustomerSuccessValidationError } from "./entities/customer-success-stage.entity";
 export type { CustomerSuccessStageProps } from "./entities/customer-success-stage.entity";
 
+export {
+  ScheduledCommercialReturn,
+  ScheduledCommercialReturnValidationError,
+  COMMERCIAL_RETURN_ADVANCE_DAYS,
+} from "./entities/scheduled-commercial-return.entity";
+export type {
+  ScheduledCommercialReturnProps,
+  ScheduleCommercialReturnInput,
+} from "./entities/scheduled-commercial-return.entity";
+
 // Domain Events
 export * from "./events";
 

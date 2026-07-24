@@ -79,6 +79,7 @@ export type LeadDiscardReason =
 export const OpportunityType = {
   NOVO_NEGOCIO: "novo_negocio",
   RENOVACAO: "renovacao",
+  RECUPERACAO: "recuperacao",
   CROSS_SELL: "cross_sell",
   DEMANDA_DIRETA: "demanda_direta",
 } as const;
@@ -89,9 +90,44 @@ export const OpportunityStatus = {
   ABERTA: "aberta",
   GANHA: "ganha",
   PERDIDA: "perdida",
+  CANCELADA: "cancelada",
 } as const;
 export type OpportunityStatus =
   (typeof OpportunityStatus)[keyof typeof OpportunityStatus];
+
+export const OpportunityCloseOutcome = {
+  RENOVOU_OUTRA_CORRETORA: "renovou_outra_corretora",
+  RENOVOU_DIRETO_BANCO_SEGURADORA: "renovou_direto_banco_seguradora",
+  CONTRATOU_PROTECAO_VEICULAR: "contratou_protecao_veicular",
+  NAO_RENOVOU_SEGURO: "nao_renovou_seguro",
+  NAO_FOI_POSSIVEL_CONCLUIR: "nao_foi_possivel_concluir",
+  CANCELAMENTO_ERRO_DUPLICIDADE: "cancelamento_erro_duplicidade",
+} as const;
+export type OpportunityCloseOutcome =
+  (typeof OpportunityCloseOutcome)[keyof typeof OpportunityCloseOutcome];
+
+export const OpportunityLossReason = {
+  PRECO: "preco",
+  COBERTURA: "cobertura",
+  CONDICAO_PAGAMENTO: "condicao_pagamento",
+  RELACIONAMENTO_OUTRA_EMPRESA: "relacionamento_outra_empresa",
+  NAO_RESPONDEU: "nao_respondeu",
+  DESISTIU: "desistiu",
+  VENDEU_OU_NAO_POSSUI_BEM: "vendeu_ou_nao_possui_bem",
+  RISCO_RECUSADO: "risco_recusado",
+  DOCUMENTACAO_INCOMPLETA: "documentacao_incompleta",
+  OUTRO: "outro",
+} as const;
+export type OpportunityLossReason =
+  (typeof OpportunityLossReason)[keyof typeof OpportunityLossReason];
+
+export const ScheduledCommercialReturnStatus = {
+  PENDENTE: "pendente",
+  PROCESSADO: "processado",
+  CANCELADO: "cancelado",
+} as const;
+export type ScheduledCommercialReturnStatus =
+  (typeof ScheduledCommercialReturnStatus)[keyof typeof ScheduledCommercialReturnStatus];
 
 export const NextStepStatus = {
   PENDENTE: "pendente",
@@ -187,6 +223,9 @@ export const TimelineEventType = {
   FOLLOW_UP: "follow_up",
   CLOSED_WON: "closed_won",
   CLOSED_LOST: "closed_lost",
+  CLOSED_CANCELLED: "closed_cancelled",
+  COMMERCIAL_RETURN_SCHEDULED: "commercial_return_scheduled",
+  COMMERCIAL_RETURN_ACTIVATED: "commercial_return_activated",
   RENEWAL: "renewal",
   CROSS_SELL: "cross_sell",
   CUSTOMER_SUCCESS: "customer_success",

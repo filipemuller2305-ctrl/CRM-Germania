@@ -88,7 +88,8 @@ export class OpportunityLostEvent extends BaseEvent {
   constructor(
     public readonly opportunityId: number,
     public readonly personId: number,
-    public readonly lostReason: string,
+    public readonly closeOutcome: string,
+    public readonly lossReason: string,
     actorId: number | null
   ) {
     super("opportunity.lost", actorId);

@@ -6,9 +6,13 @@
 import {
   ContactSource,
   EntryChannel,
+  OpportunityCloseOutcome,
+  OpportunityLossReason,
   OpportunityStatus,
   OpportunityType,
   type AttributionSnapshot,
+  type OpportunityCloseOutcome as OpportunityCloseOutcomeType,
+  type OpportunityLossReason as OpportunityLossReasonType,
   type StageKind,
 } from "../types";
 import { Money } from "../value-objects/money";
@@ -29,8 +33,12 @@ export interface OpportunityProps {
   probability: number;
   attribution: AttributionSnapshot;
   renewalKey: string | null;
+  recoveryKey: string | null;
   status: OpportunityStatus;
-  lostReason: string | null;
+  closeOutcome: OpportunityCloseOutcomeType | null;
+  lossReason: OpportunityLossReasonType | null;
+  closeNotes: string | null;
+  nextExpirationDate: Date | null;
   notes: string | null;
   createdAt: Date;
   lastMovementAt: Date;
@@ -50,10 +58,24 @@ export interface CreateOpportunityInput {
   type: OpportunityType;
   attribution: AttributionSnapshot;
   renewalKey?: string | null;
+  recoveryKey?: string | null;
   estimatedValue?: number | string | null;
   probability?: number;
   notes?: string | null;
 }
+
+export interface OpportunityCloseDetails {
+  outcome: OpportunityCloseOutcomeType;
+  reason?: OpportunityLossReasonType | null;
+  notes: string;
+  nextExpirationDate?: Date | string | null;
+}
+
+const EXTERNAL_CONTRACT_OUTCOMES: OpportunityCloseOutcomeType[] = [
+  OpportunityCloseOutcome.RENOVOU_OUTRA_CORRETORA,
+  OpportunityCloseOutcome.RENOVOU_DIRETO_BANCO_SEGURADORA,
+  OpportunityCloseOutcome.CONTRATOU_PROTECAO_VEICULAR,
+];
 
 export class Opportunity {
   private constructor(private props: OpportunityProps) {}
@@ -102,6 +124,17 @@ export class Opportunity {
         "Produto contratado e chave de renovação só são válidos em renovação"
       );
     }
+    if (input.type === OpportunityType.RECUPERACAO) {
+      if (!input.recoveryKey?.trim()) {
+        throw new OpportunityValidationError(
+          "Recuperação deve possuir uma chave de retorno comercial"
+        );
+      }
+    } else if (input.recoveryKey) {
+      throw new OpportunityValidationError(
+        "Chave de retorno comercial só é válida em recuperação"
+      );
+    }
     if (
       input.type === OpportunityType.CROSS_SELL &&
       input.leadId
@@ -135,8 +168,12 @@ export class Opportunity {
       probability,
       attribution: { ...input.attribution },
       renewalKey: input.renewalKey?.trim() || null,
+      recoveryKey: input.recoveryKey?.trim() || null,
       status: OpportunityStatus.ABERTA,
-      lostReason: null,
+      closeOutcome: null,
+      lossReason: null,
+      closeNotes: null,
+      nextExpirationDate: null,
       notes: input.notes?.trim() || null,
       createdAt: now,
       lastMovementAt: now,
@@ -158,7 +195,7 @@ export class Opportunity {
   moveToStage(
     newStageId: number,
     stageKind: StageKind,
-    lostReason?: string | null
+    closeDetails?: OpportunityCloseDetails | null
   ): void {
     if (!this.isOpen) {
       throw new OpportunityValidationError(
@@ -169,19 +206,64 @@ export class Opportunity {
     if (newStageId === this.props.stageId && stageKind === "open") return;
 
     if (stageKind === "lost") {
-      const reason = lostReason?.trim();
-      if (!reason || reason.length < 3) {
+      if (!closeDetails) {
         throw new OpportunityValidationError(
-          "Motivo da perda é obrigatório (mínimo 3 caracteres)"
+          "Desfecho, motivo e observação são obrigatórios no encerramento"
         );
       }
-      this.props.status = OpportunityStatus.PERDIDA;
-      this.props.lostReason = reason;
+      const notes = closeDetails.notes.trim();
+      if (notes.length < 3) {
+        throw new OpportunityValidationError(
+          "Observação do encerramento é obrigatória"
+        );
+      }
+      if (!Object.values(OpportunityCloseOutcome).includes(closeDetails.outcome)) {
+        throw new OpportunityValidationError("Desfecho de encerramento inválido");
+      }
+
+      const isAdministrativeCancellation =
+        closeDetails.outcome ===
+        OpportunityCloseOutcome.CANCELAMENTO_ERRO_DUPLICIDADE;
+      if (!isAdministrativeCancellation) {
+        if (
+          !closeDetails.reason ||
+          !Object.values(OpportunityLossReason).includes(closeDetails.reason)
+        ) {
+          throw new OpportunityValidationError(
+            "Motivo do encerramento é obrigatório"
+          );
+        }
+      }
+
+      const nextExpirationDate = closeDetails.nextExpirationDate
+        ? Opportunity.parseDate(closeDetails.nextExpirationDate)
+        : null;
+      if (
+        EXTERNAL_CONTRACT_OUTCOMES.includes(closeDetails.outcome) &&
+        !nextExpirationDate
+      ) {
+        throw new OpportunityValidationError(
+          "Próximo vencimento é obrigatório quando o cliente contratou fora da Germânia"
+        );
+      }
+
+      this.props.status = isAdministrativeCancellation
+        ? OpportunityStatus.CANCELADA
+        : OpportunityStatus.PERDIDA;
+      this.props.closeOutcome = closeDetails.outcome;
+      this.props.lossReason = isAdministrativeCancellation
+        ? null
+        : closeDetails.reason!;
+      this.props.closeNotes = notes;
+      this.props.nextExpirationDate = nextExpirationDate;
       this.props.probability = 0;
       this.props.closedAt = new Date();
     } else if (stageKind === "won") {
       this.props.status = OpportunityStatus.GANHA;
-      this.props.lostReason = null;
+      this.props.closeOutcome = null;
+      this.props.lossReason = null;
+      this.props.closeNotes = null;
+      this.props.nextExpirationDate = null;
       this.props.probability = 100;
       this.props.closedAt = new Date();
     } else {
@@ -237,8 +319,18 @@ export class Opportunity {
     return { ...this.props.attribution };
   }
   get renewalKey(): string | null { return this.props.renewalKey; }
+  get recoveryKey(): string | null { return this.props.recoveryKey; }
   get status(): OpportunityStatus { return this.props.status; }
-  get lostReason(): string | null { return this.props.lostReason; }
+  get closeOutcome(): OpportunityCloseOutcomeType | null {
+    return this.props.closeOutcome;
+  }
+  get lossReason(): OpportunityLossReasonType | null {
+    return this.props.lossReason;
+  }
+  get closeNotes(): string | null { return this.props.closeNotes; }
+  get nextExpirationDate(): Date | null {
+    return this.props.nextExpirationDate;
+  }
   get notes(): string | null { return this.props.notes; }
   get createdAt(): Date { return this.props.createdAt; }
   get lastMovementAt(): Date { return this.props.lastMovementAt; }
@@ -251,6 +343,9 @@ export class Opportunity {
   }
   get isLost(): boolean {
     return this.props.status === OpportunityStatus.PERDIDA;
+  }
+  get isCancelled(): boolean {
+    return this.props.status === OpportunityStatus.CANCELADA;
   }
   get daysStale(): number {
     return Math.floor(
@@ -279,8 +374,12 @@ export class Opportunity {
       referredByPersonId: this.props.attribution.referredByPersonId,
       sourceDetail: this.props.attribution.sourceDetail,
       renewalKey: this.props.renewalKey,
+      recoveryKey: this.props.recoveryKey,
       status: this.props.status,
-      lostReason: this.props.lostReason,
+      closeOutcome: this.props.closeOutcome,
+      lossReason: this.props.lossReason,
+      closeNotes: this.props.closeNotes,
+      nextExpirationDate: this.props.nextExpirationDate,
       notes: this.props.notes,
       createdAt: this.props.createdAt,
       lastMovementAt: this.props.lastMovementAt,
@@ -324,6 +423,18 @@ export class Opportunity {
         "Origem 'outro' exige detalhamento"
       );
     }
+  }
+
+  private static parseDate(value: Date | string): Date {
+    const date =
+      value instanceof Date
+        ? new Date(value)
+        : new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value);
+    if (Number.isNaN(date.getTime())) {
+      throw new OpportunityValidationError("Próximo vencimento inválido");
+    }
+    date.setHours(0, 0, 0, 0);
+    return date;
   }
 
   private static assertPositiveId(value: number, field: string): void {

@@ -14,6 +14,7 @@ scg/src/
 │   │   ├── person.entity.ts         ← Pessoa (entidade central)
 │   │   ├── lead.entity.ts           ← Entrada e qualificação
 │   │   ├── opportunity.entity.ts    ← Oportunidade comercial
+│   │   ├── scheduled-commercial-return.entity.ts ← Retorno de apólice externa
 │   │   ├── next-step.entity.ts      ← Próximo Passo (INV-02)
 │   │   ├── activity.entity.ts       ← Atividade do consultor
 │   │   ├── person-product.entity.ts ← Produto/Seguro da pessoa
@@ -92,6 +93,7 @@ scg/src/
 | 07 | Atividade gera NextStep | `RegisterActivityUseCase` (flag generateNextStep) |
 | 08 | Produto → Cross Sell | `OnProductActivatedHandler` + `CrossSellEngine` |
 | 09 | Renovação → Oportunidade | `RenewalCheckerCron` + `RenewalDetector` |
+| 10 | Renovação perdida → recuperação futura | `ScheduledCommercialReturn` + `CommercialReturnCheckerCron` |
 | 10 | Movimentação → Timeline | `MoveStageUseCase` + todos os use cases |
 
 ---

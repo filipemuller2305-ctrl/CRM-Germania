@@ -34,6 +34,7 @@ export const opportunityStatusEnum = pgEnum("opportunity_status", [
   "aberta",
   "ganha",
   "perdida",
+  "cancelada",
 ]);
 
 export const leadStatusEnum = pgEnum("lead_status", [
@@ -78,9 +79,40 @@ export const leadDiscardReasonEnum = pgEnum("lead_discard_reason", [
 export const opportunityTypeEnum = pgEnum("opportunity_type", [
   "novo_negocio",
   "renovacao",
+  "recuperacao",
   "cross_sell",
   "demanda_direta",
 ]);
+
+export const opportunityCloseOutcomeEnum = pgEnum(
+  "opportunity_close_outcome",
+  [
+    "renovou_outra_corretora",
+    "renovou_direto_banco_seguradora",
+    "contratou_protecao_veicular",
+    "nao_renovou_seguro",
+    "nao_foi_possivel_concluir",
+    "cancelamento_erro_duplicidade",
+  ]
+);
+
+export const opportunityLossReasonEnum = pgEnum("opportunity_loss_reason", [
+  "preco",
+  "cobertura",
+  "condicao_pagamento",
+  "relacionamento_outra_empresa",
+  "nao_respondeu",
+  "desistiu",
+  "vendeu_ou_nao_possui_bem",
+  "risco_recusado",
+  "documentacao_incompleta",
+  "outro",
+]);
+
+export const scheduledCommercialReturnStatusEnum = pgEnum(
+  "scheduled_commercial_return_status",
+  ["pendente", "processado", "cancelado"]
+);
 
 export const nextStepStatusEnum = pgEnum("next_step_status", [
   "pendente",
@@ -337,8 +369,12 @@ export const opportunities = pgTable(
     ),
     sourceDetail: text("source_detail"),
     renewalKey: text("renewal_key"),
+    recoveryKey: text("recovery_key"),
     status: opportunityStatusEnum("status").notNull().default("aberta"),
-    lostReason: text("lost_reason"),
+    closeOutcome: opportunityCloseOutcomeEnum("close_outcome"),
+    lossReason: opportunityLossReasonEnum("loss_reason"),
+    closeNotes: text("close_notes"),
+    nextExpirationDate: date("next_expiration_date"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastMovementAt: timestamp("last_movement_at", { withTimezone: true }).notNull().defaultNow(),
@@ -353,16 +389,103 @@ export const opportunities = pgTable(
     index("idx_opp_last_movement").on(table.lastMovementAt),
     uniqueIndex("idx_opp_lead_unique").on(table.leadId),
     uniqueIndex("idx_opp_renewal_key_unique").on(table.renewalKey),
+    uniqueIndex("idx_opp_recovery_key_unique").on(table.recoveryKey),
     uniqueIndex("idx_opp_cross_sell_unique").on(table.crossSellSuggestionId),
     check(
       "opportunities_origin_consistency",
       sql`(${table.leadId} IS NULL OR ${table.type} = 'novo_negocio')
         AND (${table.type} <> 'renovacao' OR (${table.personProductId} IS NOT NULL AND ${table.renewalKey} IS NOT NULL))
-        AND (${table.type} = 'renovacao' OR (${table.personProductId} IS NULL AND ${table.renewalKey} IS NULL))`
+        AND (${table.type} = 'renovacao' OR (${table.personProductId} IS NULL AND ${table.renewalKey} IS NULL))
+        AND (${table.type} <> 'recuperacao' OR ${table.recoveryKey} IS NOT NULL)
+        AND (${table.type} = 'recuperacao' OR ${table.recoveryKey} IS NULL)`
     ),
     check(
       "opportunities_no_self_referral",
       sql`${table.referredByPersonId} IS NULL OR ${table.referredByPersonId} <> ${table.personId}`
+    ),
+    check(
+      "opportunities_close_details_consistency",
+      sql`(
+          ${table.status} = 'perdida'
+          AND ${table.closeOutcome} IS NOT NULL
+          AND ${table.lossReason} IS NOT NULL
+          AND nullif(btrim(${table.closeNotes}), '') IS NOT NULL
+        ) OR (
+          ${table.status} = 'cancelada'
+          AND ${table.closeOutcome} = 'cancelamento_erro_duplicidade'
+          AND ${table.lossReason} IS NULL
+          AND nullif(btrim(${table.closeNotes}), '') IS NOT NULL
+        ) OR ${table.status} IN ('aberta', 'ganha')`
+    ),
+    check(
+      "opportunities_external_expiration_required",
+      sql`${table.closeOutcome} NOT IN (
+          'renovou_outra_corretora',
+          'renovou_direto_banco_seguradora',
+          'contratou_protecao_veicular'
+        ) OR ${table.nextExpirationDate} IS NOT NULL`
+    ),
+  ]
+);
+
+// ─── SCHEDULED COMMERCIAL RETURNS ───────────────────────────────────────────
+
+export const scheduledCommercialReturns = pgTable(
+  "scheduled_commercial_returns",
+  {
+    id: serial("id").primaryKey(),
+    personId: integer("person_id")
+      .notNull()
+      .references(() => people.id),
+    sourceOpportunityId: integer("source_opportunity_id")
+      .notNull()
+      .references(() => opportunities.id),
+    createdOpportunityId: integer("created_opportunity_id").references(
+      () => opportunities.id
+    ),
+    productTypeId: integer("product_type_id")
+      .notNull()
+      .references(() => productTypes.id),
+    ownerId: integer("owner_id")
+      .notNull()
+      .references(() => users.id),
+    closeOutcome: opportunityCloseOutcomeEnum("close_outcome").notNull(),
+    nextExpirationDate: date("next_expiration_date").notNull(),
+    scheduledFor: date("scheduled_for").notNull(),
+    notes: text("notes").notNull(),
+    status: scheduledCommercialReturnStatusEnum("status")
+      .notNull()
+      .default("pendente"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("idx_commercial_return_source_unique").on(
+      table.sourceOpportunityId
+    ),
+    uniqueIndex("idx_commercial_return_created_opportunity_unique").on(
+      table.createdOpportunityId
+    ),
+    index("idx_commercial_return_due").on(table.status, table.scheduledFor),
+    index("idx_commercial_return_person").on(table.personId),
+    check(
+      "scheduled_return_external_outcome",
+      sql`${table.closeOutcome} IN (
+        'renovou_outra_corretora',
+        'renovou_direto_banco_seguradora',
+        'contratou_protecao_veicular'
+      )`
+    ),
+    check(
+      "scheduled_return_45_days_before",
+      sql`${table.scheduledFor} = ${table.nextExpirationDate} - 45`
+    ),
+    check(
+      "scheduled_return_notes_required",
+      sql`nullif(btrim(${table.notes}), '') IS NOT NULL`
     ),
   ]
 );

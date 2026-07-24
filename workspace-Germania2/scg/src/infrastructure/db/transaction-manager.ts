@@ -9,6 +9,7 @@ import { DrizzleNextStepRepository } from "./repositories/next-step.repository";
 import { DrizzleOpportunityRepository } from "./repositories/opportunity.repository";
 import { DrizzlePersonRepository } from "./repositories/person.repository";
 import { DrizzleTimelineRepository } from "./repositories/timeline.repository";
+import { DrizzleScheduledCommercialReturnRepository } from "./repositories/scheduled-commercial-return.repository";
 
 export class DrizzleTransactionManager implements TransactionManager {
   async run<T>(
@@ -22,6 +23,8 @@ export class DrizzleTransactionManager implements TransactionManager {
         opportunity: new DrizzleOpportunityRepository(database),
         nextStep: new DrizzleNextStepRepository(database),
         activity: new DrizzleActivityRepository(database),
+        scheduledCommercialReturn:
+          new DrizzleScheduledCommercialReturnRepository(database),
         timeline: new DrizzleTimelineRepository(database),
       });
     });

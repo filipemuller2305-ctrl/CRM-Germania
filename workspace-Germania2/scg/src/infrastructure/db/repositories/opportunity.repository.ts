@@ -52,6 +52,15 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
     return rows[0] ? opportunityToDomain(rows[0]) : null;
   }
 
+  async findByRecoveryKey(recoveryKey: string): Promise<Opportunity | null> {
+    const rows = await this.database
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.recoveryKey, recoveryKey))
+      .limit(1);
+    return rows[0] ? opportunityToDomain(rows[0]) : null;
+  }
+
   async listRenewals(): Promise<Opportunity[]> {
     const rows = await this.database
       .select()
@@ -153,8 +162,12 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
         referredByPersonId: data.referredByPersonId,
         sourceDetail: data.sourceDetail,
         renewalKey: data.renewalKey,
+        recoveryKey: data.recoveryKey,
         status: data.status as any,
-        lostReason: data.lostReason,
+        closeOutcome: data.closeOutcome,
+        lossReason: data.lossReason,
+        closeNotes: data.closeNotes,
+        nextExpirationDate: data.nextExpirationDate,
         notes: data.notes,
       })
       .returning();
@@ -173,7 +186,10 @@ export class DrizzleOpportunityRepository implements OpportunityRepository {
         estimatedValue: data.estimatedValue,
         probability: data.probability,
         status: data.status as any,
-        lostReason: data.lostReason,
+        closeOutcome: data.closeOutcome,
+        lossReason: data.lossReason,
+        closeNotes: data.closeNotes,
+        nextExpirationDate: data.nextExpirationDate,
         notes: data.notes,
         lastMovementAt: data.lastMovementAt,
         closedAt: data.closedAt,

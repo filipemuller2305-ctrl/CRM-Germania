@@ -42,7 +42,7 @@ export function getUseCases() {
     moveStage: new MoveStageUseCase(
       repos.opportunity,
       repos.pipeline,
-      repos.timeline
+      transaction
     ),
 
     registerActivity: new RegisterActivityUseCase(

@@ -4,6 +4,9 @@ import { Activity } from "../src/domain/entities/activity.entity";
 import { Lead } from "../src/domain/entities/lead.entity";
 import { Opportunity } from "../src/domain/entities/opportunity.entity";
 import { Person } from "../src/domain/entities/person.entity";
+import {
+  ScheduledCommercialReturn,
+} from "../src/domain/entities/scheduled-commercial-return.entity";
 import { RenewalDetector } from "../src/domain/services/renewal-detector";
 import {
   ActivityType,
@@ -11,6 +14,8 @@ import {
   EntryChannel,
   LeadStatus,
   OpportunityStatus,
+  OpportunityCloseOutcome,
+  OpportunityLossReason,
   OpportunityType,
   PersonStatus,
   ProductStatus,
@@ -113,6 +118,95 @@ test("Fechamento ganho atualiza etapa e status juntos", () => {
   assert.equal(opportunity.stageId, 9);
   assert.equal(opportunity.status, OpportunityStatus.GANHA);
   assert.equal(opportunity.probability, 100);
+});
+
+test("Encerramento externo exige próximo vencimento", () => {
+  const opportunity = Opportunity.create({
+    personId: 1,
+    productTypeId: 7,
+    pipelineId: 1,
+    stageId: 1,
+    ownerId: 2,
+    type: OpportunityType.DEMANDA_DIRETA,
+    attribution,
+  });
+  assert.throws(
+    () =>
+      opportunity.moveToStage(9, "lost", {
+        outcome: OpportunityCloseOutcome.RENOVOU_OUTRA_CORRETORA,
+        reason: OpportunityLossReason.PRECO,
+        notes: "Cliente renovou com outra corretora.",
+      }),
+    /Próximo vencimento/
+  );
+});
+
+test("Renovação perdida programa retorno 45 dias antes", () => {
+  const opportunity = Opportunity.create({
+    personId: 1,
+    productTypeId: 7,
+    pipelineId: 1,
+    stageId: 1,
+    ownerId: 2,
+    type: OpportunityType.DEMANDA_DIRETA,
+    attribution,
+  });
+  opportunity.moveToStage(9, "lost", {
+    outcome: OpportunityCloseOutcome.RENOVOU_DIRETO_BANCO_SEGURADORA,
+    reason: OpportunityLossReason.CONDICAO_PAGAMENTO,
+    notes: "Cliente manteve o seguro residencial no banco.",
+    nextExpirationDate: "2027-07-24",
+  });
+  const commercialReturn = ScheduledCommercialReturn.schedule({
+    personId: opportunity.personId,
+    sourceOpportunityId: 50,
+    productTypeId: opportunity.productTypeId,
+    ownerId: opportunity.ownerId,
+    closeOutcome: opportunity.closeOutcome!,
+    nextExpirationDate: opportunity.nextExpirationDate!,
+    notes: opportunity.closeNotes!,
+    referenceDate: new Date("2026-07-24T12:00:00-03:00"),
+  });
+
+  assert.equal(opportunity.status, OpportunityStatus.PERDIDA);
+  assert.equal(
+    commercialReturn.scheduledFor.toISOString().slice(0, 10),
+    "2027-06-09"
+  );
+});
+
+test("Cancelamento administrativo não conta como perda", () => {
+  const opportunity = Opportunity.create({
+    personId: 1,
+    productTypeId: 7,
+    pipelineId: 1,
+    stageId: 1,
+    ownerId: 2,
+    type: OpportunityType.DEMANDA_DIRETA,
+    attribution,
+  });
+  opportunity.moveToStage(9, "lost", {
+    outcome: OpportunityCloseOutcome.CANCELAMENTO_ERRO_DUPLICIDADE,
+    notes: "Registro duplicado criado durante importação.",
+  });
+  assert.equal(opportunity.status, OpportunityStatus.CANCELADA);
+  assert.equal(opportunity.isLost, false);
+});
+
+test("Recuperação exige chave idempotente do retorno", () => {
+  assert.throws(
+    () =>
+      Opportunity.create({
+        personId: 1,
+        productTypeId: 7,
+        pipelineId: 1,
+        stageId: 1,
+        ownerId: 2,
+        type: OpportunityType.RECUPERACAO,
+        attribution,
+      }),
+    /chave de retorno/
+  );
 });
 
 test("Atividade não mistura Lead e Oportunidade", () => {

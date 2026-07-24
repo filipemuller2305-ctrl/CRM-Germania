@@ -11,6 +11,7 @@ import type { NextStep, NextStepProps } from "@/domain/entities/next-step.entity
 import type { Activity } from "@/domain/entities/activity.entity";
 import type { PersonProduct } from "@/domain/entities/person-product.entity";
 import type { CustomerSuccessStage } from "@/domain/entities/customer-success-stage.entity";
+import type { ScheduledCommercialReturn } from "@/domain/entities/scheduled-commercial-return.entity";
 import type { OpportunityStatus, NextStepStatus, ProductStatus } from "@/domain/types";
 
 // ─── PAGINATION ──────────────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ export interface OpportunityRepository {
   findByPersonId(personId: number): Promise<Opportunity[]>;
   findByLeadId(leadId: number): Promise<Opportunity | null>;
   findByRenewalKey(renewalKey: string): Promise<Opportunity | null>;
+  findByRecoveryKey(recoveryKey: string): Promise<Opportunity | null>;
   listRenewals(): Promise<Opportunity[]>;
   findOpenByPersonAndProduct(personId: number, productTypeId: number): Promise<Opportunity | null>;
   listByPipeline(pipelineId: number): Promise<Opportunity[]>;
@@ -68,6 +70,22 @@ export interface OpportunityRepository {
   create(opportunity: Opportunity): Promise<Opportunity>;
   update(opportunity: Opportunity): Promise<Opportunity>;
   countOpenByOwner(ownerId: number): Promise<number>;
+}
+
+// ─── SCHEDULED COMMERCIAL RETURN REPOSITORY ─────────────────────────────────
+
+export interface ScheduledCommercialReturnRepository {
+  findById(id: number): Promise<ScheduledCommercialReturn | null>;
+  findBySourceOpportunityId(
+    sourceOpportunityId: number
+  ): Promise<ScheduledCommercialReturn | null>;
+  findDue(referenceDate?: Date): Promise<ScheduledCommercialReturn[]>;
+  create(
+    commercialReturn: ScheduledCommercialReturn
+  ): Promise<ScheduledCommercialReturn>;
+  update(
+    commercialReturn: ScheduledCommercialReturn
+  ): Promise<ScheduledCommercialReturn>;
 }
 
 // ─── NEXT STEP REPOSITORY ────────────────────────────────────────────────────
@@ -136,6 +154,7 @@ export interface TransactionRepositories {
   opportunity: OpportunityRepository;
   nextStep: NextStepRepository;
   activity: ActivityRepository;
+  scheduledCommercialReturn: ScheduledCommercialReturnRepository;
   timeline: TimelineRepository;
 }
 

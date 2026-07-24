@@ -14,6 +14,7 @@ import { DrizzleTimelineRepository } from "./timeline.repository";
 import { DrizzleCrossSellRepository } from "./cross-sell.repository";
 import { DrizzlePipelineRepository } from "./pipeline.repository";
 import { DrizzleUserRepository } from "./user.repository";
+import { DrizzleScheduledCommercialReturnRepository } from "./scheduled-commercial-return.repository";
 import type {
   PersonRepository,
   LeadRepository,
@@ -26,6 +27,7 @@ import type {
   CrossSellRepository,
   PipelineRepository,
   UserRepository,
+  ScheduledCommercialReturnRepository,
 } from "@/application/ports";
 
 // ─── REPOSITORIES INTERFACE ──────────────────────────────────────────────────
@@ -42,6 +44,7 @@ export interface Repositories {
   crossSell: CrossSellRepository;
   pipeline: PipelineRepository;
   user: UserRepository;
+  scheduledCommercialReturn: ScheduledCommercialReturnRepository;
 }
 
 // ─── SINGLETON INSTANCES ─────────────────────────────────────────────────────
@@ -67,6 +70,8 @@ export function getRepositories(): Repositories {
       crossSell: new DrizzleCrossSellRepository(),
       pipeline: new DrizzlePipelineRepository(),
       user: new DrizzleUserRepository(),
+      scheduledCommercialReturn:
+        new DrizzleScheduledCommercialReturnRepository(),
     };
   }
   return _instance;
@@ -86,4 +91,5 @@ export {
   DrizzleCrossSellRepository,
   DrizzlePipelineRepository,
   DrizzleUserRepository,
+  DrizzleScheduledCommercialReturnRepository,
 };
